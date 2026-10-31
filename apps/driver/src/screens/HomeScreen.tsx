@@ -3,10 +3,10 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   Alert, Animated, Dimensions, Switch, ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
+import { OSMMap } from '../components/OSMMap';
 import type { Ride } from '../types';
 
 const { height } = Dimensions.get('window');
@@ -30,11 +30,9 @@ const makeMockRide = (lat: number, lng: number): Ride => ({
 });
 
 // Região padrão enquanto GPS carrega
-const FALLBACK_REGION: Region = {
+const FALLBACK_COORDS = {
   latitude: -15.7942,
   longitude: -47.8822,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
 };
 
 const formatBRL = (v: number) =>
@@ -49,12 +47,11 @@ const formatBRL = (v: number) =>
  */
 export function HomeScreen() {
   const { driver, logout } = useAuth();
-  const [region, setRegion]           = useState<Region>(FALLBACK_REGION);
+  const [coords, setCoords]           = useState<{ lat: number; lng: number }>({ lat: -15.7942, lng: -47.8822 });
   const [gpsReady, setGpsReady]       = useState(false);
   const [isOnline, setIsOnline]       = useState(false);
   const [rideRequest, setRideRequest] = useState<Ride | null>(null);
   const [activeRide, setActiveRide]   = useState<Ride | null>(null);
-  const mapRef = useRef<MapView>(null);
   const slideAnim = useRef(new Animated.Value(300)).current;
 
   // Solicita permissão e obtém localização real
@@ -64,21 +61,13 @@ export function HomeScreen() {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permissão de Localização', 'Ative o GPS nas configurações para receber corridas.');
           if (isMounted) setGpsReady(true);
           return;
         }
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (isMounted && loc?.coords) {
-          const userRegion: Region = {
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          };
-          setRegion(userRegion);
+          setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
           setGpsReady(true);
-          mapRef.current?.animateToRegion(userRegion, 800);
         }
       } catch (err) {
         console.warn('Erro ao obter localização do motorista:', err);
@@ -92,12 +81,12 @@ export function HomeScreen() {
   useEffect(() => {
     if (!isOnline || rideRequest || activeRide || !gpsReady) return;
     const t = setTimeout(() => {
-      const mockRide = makeMockRide(region.latitude, region.longitude);
+      const mockRide = makeMockRide(coords.lat, coords.lng);
       setRideRequest(mockRide);
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65 }).start();
     }, 3000);
     return () => clearTimeout(t);
-  }, [isOnline, rideRequest, activeRide, gpsReady]);
+  }, [isOnline, rideRequest, activeRide, gpsReady, coords]);
 
   const dismissRequest = () => {
     Animated.timing(slideAnim, { toValue: 300, duration: 250, useNativeDriver: true }).start(() => {
@@ -125,21 +114,16 @@ export function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Mapa centrado na localização real */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        initialRegion={region}
-        showsUserLocation
-        showsMyLocationButton={false}
-      >
-        {activeRide && (
-          <>
-            <Marker coordinate={activeRide.origin} title="Passageiro" pinColor={Colors.amber} />
-            <Marker coordinate={activeRide.destination} title="Destino" pinColor={Colors.danger} />
-          </>
-        )}
-      </MapView>
+      {/* Mapa 100% nativo OpenStreetMap (nunca fecha ou trava por falta de Google API Key) */}
+      <OSMMap
+        latitude={coords.lat}
+        longitude={coords.lng}
+        zoom={15}
+        markers={activeRide ? [
+          { latitude: activeRide.origin.latitude, longitude: activeRide.origin.longitude, title: 'Passageiro' },
+          { latitude: activeRide.destination.latitude, longitude: activeRide.destination.longitude, title: 'Destino' },
+        ] : []}
+      />
 
       {/* Spinner enquanto GPS carrega */}
       {!gpsReady && (

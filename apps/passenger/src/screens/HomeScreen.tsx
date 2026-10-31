@@ -3,11 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, FlatList, Alert, ActivityIndicator, Image,
 } from 'react-native';
-import MapView, { Marker, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { OSMMap } from '../components/OSMMap';
 import type { Ride, Location as RideLocation } from '../types';
 
 type Step = 'idle' | 'selecting_destination' | 'confirming' | 'searching' | 'active';
@@ -21,11 +21,9 @@ const SUGGESTIONS = [
   { id: '5', label: 'Rodoviária do Plano Piloto', address: 'Centro - Brasília', lat: -15.7942, lng: -47.8822 },
 ];
 
-const FALLBACK_REGION: Region = {
+const FALLBACK_COORDS = {
   latitude: -15.7942,
   longitude: -47.8822,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
 };
 
 const PRICE_PER_KM   = 2.50;
@@ -43,39 +41,40 @@ const formatBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', 
 export function HomeScreen() {
   const { passenger, logout } = useAuth();
   const { colors, isDark } = useTheme();
-  const [region, setRegion]         = useState<Region>(FALLBACK_REGION);
+  const [coords, setCoords]         = useState<{ lat: number; lng: number }>({ lat: -15.7942, lng: -47.8822 });
   const [gpsReady, setGpsReady]     = useState(false);
   const [step, setStep]             = useState<Step>('idle');
   const [search, setSearch]         = useState('');
   const [destination, setDest]      = useState<typeof SUGGESTIONS[0] | null>(null);
   const [activeRide, setActiveRide] = useState<Partial<Ride> | null>(null);
-  const mapRef = useRef<MapView>(null);
 
   const ORIGIN: RideLocation = {
-    latitude: region.latitude,
-    longitude: region.longitude,
+    latitude: coords.lat,
+    longitude: coords.lng,
     address: 'Sua localização',
   };
 
   // Solicita permissão e obtém localização real
   useEffect(() => {
+    let isMounted = true;
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setGpsReady(true);
-        return;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          if (isMounted) setGpsReady(true);
+          return;
+        }
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (isMounted && loc?.coords) {
+          setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          setGpsReady(true);
+        }
+      } catch (err) {
+        console.warn('Erro ao obter localização do passageiro:', err);
+        if (isMounted) setGpsReady(true);
       }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const userRegion: Region = {
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      };
-      setRegion(userRegion);
-      setGpsReady(true);
-      mapRef.current?.animateToRegion(userRegion, 800);
     })();
+    return () => { isMounted = false; };
   }, []);
 
   const distanceKm   = destination ? parseFloat((Math.random() * 8 + 2).toFixed(1)) : 0;
@@ -119,21 +118,15 @@ export function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Mapa centrado na localização real */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        initialRegion={region}
-        showsUserLocation
-      >
-        {destination && (
-          <Marker
-            coordinate={{ latitude: destination.lat, longitude: destination.lng }}
-            title={destination.label}
-            pinColor={Colors.amber}
-          />
-        )}
-      </MapView>
+      {/* Mapa 100% nativo OpenStreetMap (Leaflet) sem dependência do Google Maps Play Services */}
+      <OSMMap
+        latitude={coords.lat}
+        longitude={coords.lng}
+        zoom={15}
+        markers={destination ? [
+          { latitude: destination.lat, longitude: destination.lng, title: destination.label, color: colors.amber }
+        ] : []}
+      />
 
       {/* Spinner enquanto GPS carrega */}
       {!gpsReady && (
