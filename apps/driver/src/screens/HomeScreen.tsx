@@ -59,24 +59,33 @@ export function HomeScreen() {
 
   // Solicita permissão e obtém localização real
   useEffect(() => {
+    let isMounted = true;
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permissão negada', 'Ative a localização para usar o app.');
-        setGpsReady(true);
-        return;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permissão de Localização', 'Ative o GPS nas configurações para receber corridas.');
+          if (isMounted) setGpsReady(true);
+          return;
+        }
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (isMounted && loc?.coords) {
+          const userRegion: Region = {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          };
+          setRegion(userRegion);
+          setGpsReady(true);
+          mapRef.current?.animateToRegion(userRegion, 800);
+        }
+      } catch (err) {
+        console.warn('Erro ao obter localização do motorista:', err);
+        if (isMounted) setGpsReady(true);
       }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const userRegion: Region = {
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      };
-      setRegion(userRegion);
-      setGpsReady(true);
-      mapRef.current?.animateToRegion(userRegion, 800);
     })();
+    return () => { isMounted = false; };
   }, []);
 
   // Simula recebimento de corrida após 3s quando online

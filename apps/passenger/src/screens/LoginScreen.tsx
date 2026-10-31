@@ -14,8 +14,8 @@ import { Spacing, Radius } from '../constants/theme';
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const { login, isLoading } = useAuth();
   const { colors, isDark } = useTheme();
-  const [email, setEmail]       = useState('passageiro@88mobility.com');
-  const [password, setPassword] = useState('Pass88#2026');
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
 
   const handleLogin = async () => {
     const trimmedEmail = email.trim();
@@ -75,11 +75,6 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         <View style={styles.form}>
           <Text style={[styles.formTitle, { color: colors.text }]}>Bem-vindo de volta!</Text>
           <Text style={[styles.formSubtitle, { color: colors.textSecondary }]}>Entre para solicitar sua corrida</Text>
-
-          {/* Dev hint */}
-          <View style={[styles.devHint, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7', borderColor: colors.amber }]}>
-            <Text style={[styles.devHintText, { color: colors.amber }]}>🔧 DEV · Qualquer email/senha funciona</Text>
-          </View>
 
           <View style={styles.fieldGroup}>
             <Text style={[styles.label, { color: colors.textSecondary }]}>Email</Text>

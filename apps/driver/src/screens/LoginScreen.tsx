@@ -1,42 +1,52 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ScrollView, Alert, Image,
+  StyleSheet, ScrollView, Alert, Image, ActivityIndicator,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { Colors, Spacing, Radius } from '../constants/theme';
 
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const { login, isLoginLoading, isAuthenticated } = useAuth();
-  const [email, setEmail]       = useState('motorista@88mobility.com');
-  const [password, setPassword] = useState('Driver88#2026');
+  const { login, registerDriver, isLoginLoading, isAuthenticated } = useAuth();
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+
+  // Campos de login / cadastro
+  const [name, setName]                 = useState('');
+  const [phone, setPhone]               = useState('');
+  const [email, setEmail]               = useState('');
+  const [password, setPassword]         = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehiclePlate, setVehiclePlate] = useState('');
 
   // Navega assim que o contexto confirmar autenticação
   React.useEffect(() => {
     if (isAuthenticated) onLogin();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, onLogin]);
 
-  const handleLogin = () => {
+  const validatePassword = (pass: string) => {
+    const hasMinLength = pass.length >= 8;
+    const hasUpper = /[A-Z]/.test(pass);
+    const hasLower = /[a-z]/.test(pass);
+    const hasNumber = /[0-9]/.test(pass);
+    const hasSpecial = /[^A-Za-z0-9]/.test(pass);
+    return hasMinLength && hasUpper && hasLower && hasNumber && hasSpecial;
+  };
+
+  const handleAction = () => {
     const trimmedEmail = email.trim();
     const trimmedPass = password.trim();
 
     if (!trimmedEmail || !trimmedPass) {
-      Alert.alert('Atenção', 'Preencha email e senha');
+      Alert.alert('Campos Obrigatórios', 'Preencha o e-mail e a senha.');
       return;
     }
 
     if (!trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
-      Alert.alert('Email Inválido', 'Por favor insira um e-mail válido.');
+      Alert.alert('Email Inválido', 'Insira um endereço de e-mail válido.');
       return;
     }
 
-    const hasMinLength = trimmedPass.length >= 8;
-    const hasUpper = /[A-Z]/.test(trimmedPass);
-    const hasLower = /[a-z]/.test(trimmedPass);
-    const hasNumber = /[0-9]/.test(trimmedPass);
-    const hasSpecial = /[^A-Za-z0-9]/.test(trimmedPass);
-
-    if (!hasMinLength || !hasUpper || !hasLower || !hasNumber || !hasSpecial) {
+    if (!validatePassword(trimmedPass)) {
       Alert.alert(
         'Senha Fraca ou Inválida',
         'A senha deve conter ao menos:\n• 8 caracteres\n• 1 letra maiúscula\n• 1 letra minúscula\n• 1 número\n• 1 caractere especial (!@#$%^&*)'
@@ -44,7 +54,22 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
       return;
     }
 
-    login(trimmedEmail, trimmedPass);
+    if (isRegisterMode) {
+      if (!name.trim() || !phone.trim() || !vehicleModel.trim() || !vehiclePlate.trim()) {
+        Alert.alert('Dados Incompletos', 'Preencha todos os dados cadastrais e do veículo.');
+        return;
+      }
+      registerDriver({
+        name: name.trim(),
+        email: trimmedEmail,
+        phone: phone.trim(),
+        vehicleModel: vehicleModel.trim(),
+        vehiclePlate: vehiclePlate.trim().toUpperCase(),
+        password: trimmedPass,
+      });
+    } else {
+      login(trimmedEmail, trimmedPass);
+    }
   };
 
   return (
@@ -53,10 +78,9 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      {/* Glow decorativo */}
       <View style={styles.glowTop} />
 
-      {/* Logo */}
+      {/* Logo Oficial 88 Mobility */}
       <View style={styles.logoWrapper}>
         <Image
           source={require('../../assets/icon.png')}
@@ -64,20 +88,63 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
           resizeMode="contain"
         />
         <Text style={styles.appName}>88 Mobility</Text>
-        <Text style={styles.appRole}>Área do Motorista</Text>
+        <Text style={styles.appRole}>Área do Motorista Parceiro</Text>
       </View>
 
-      {/* Card */}
+      {/* Card Principal */}
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Entrar</Text>
+        <Text style={styles.cardTitle}>
+          {isRegisterMode ? 'Cadastrar Novo Motorista' : 'Entrar na Plataforma'}
+        </Text>
 
-        {/* DEV hint */}
-        <View style={styles.devHint}>
-          <Text style={styles.devHintText}>DEV · Qualquer email/senha funciona</Text>
-        </View>
+        {isRegisterMode && (
+          <>
+            <Text style={styles.label}>Nome Completo</Text>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Ex: Carlos Silva"
+              placeholderTextColor={Colors.slate500}
+              editable={!isLoginLoading}
+            />
+
+            <Text style={[styles.label, { marginTop: Spacing.sm }]}>Telefone / WhatsApp</Text>
+            <TextInput
+              style={styles.input}
+              value={phone}
+              onChangeText={setPhone}
+              placeholder="(11) 99999-9999"
+              placeholderTextColor={Colors.slate500}
+              keyboardType="phone-pad"
+              editable={!isLoginLoading}
+            />
+
+            <Text style={[styles.label, { marginTop: Spacing.sm }]}>Modelo do Veículo</Text>
+            <TextInput
+              style={styles.input}
+              value={vehicleModel}
+              onChangeText={setVehicleModel}
+              placeholder="Ex: Honda Civic 2022"
+              placeholderTextColor={Colors.slate500}
+              editable={!isLoginLoading}
+            />
+
+            <Text style={[styles.label, { marginTop: Spacing.sm }]}>Placa do Carro</Text>
+            <TextInput
+              style={styles.input}
+              value={vehiclePlate}
+              onChangeText={setVehiclePlate}
+              placeholder="BRA2E19"
+              placeholderTextColor={Colors.slate500}
+              autoCapitalize="characters"
+              editable={!isLoginLoading}
+            />
+          </>
+        )}
 
         {/* Email */}
-        <Text style={styles.label}>Email</Text>
+        <Text style={[styles.label, isRegisterMode && { marginTop: Spacing.sm }]}>E-mail</Text>
         <TextInput
           style={styles.input}
           value={email}
@@ -91,31 +158,51 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         />
 
         {/* Senha */}
-        <Text style={[styles.label, { marginTop: Spacing.md }]}>Senha</Text>
+        <Text style={[styles.label, { marginTop: Spacing.sm }]}>Senha</Text>
         <TextInput
           style={styles.input}
           value={password}
           onChangeText={setPassword}
-          placeholder="••••••"
+          placeholder="Mínimo 8 caracteres"
           placeholderTextColor={Colors.slate500}
           secureTextEntry
           editable={!isLoginLoading}
         />
 
-        {/* Botão */}
+        {/* Botão de Ação */}
         <TouchableOpacity
           style={[styles.btn, isLoginLoading && styles.btnDisabled]}
-          onPress={handleLogin}
+          onPress={handleAction}
           disabled={isLoginLoading}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
-          <Text style={styles.btnText}>
-            {isLoginLoading ? 'Entrando...' : 'Entrar'}
+          {isLoginLoading ? (
+            <ActivityIndicator color={Colors.dark} />
+          ) : (
+            <Text style={styles.btnText}>
+              {isRegisterMode ? 'Concluir Cadastro' : 'Entrar'}
+            </Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Alternância entre Login e Cadastro */}
+        <TouchableOpacity
+          style={styles.toggleModeBtn}
+          onPress={() => setIsRegisterMode(!isRegisterMode)}
+          disabled={isLoginLoading}
+        >
+          <Text style={styles.toggleModeText}>
+            {isRegisterMode
+              ? 'Já possui cadastro? '
+              : 'Novo motorista? '}
+            <Text style={styles.toggleModeLink}>
+              {isRegisterMode ? 'Entrar' : 'Cadastre-se aqui'}
+            </Text>
           </Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.footer}>88 Mobility © 2024</Text>
+      <Text style={styles.footer}>88 Mobility · 88% do valor para você</Text>
     </ScrollView>
   );
 }
@@ -138,14 +225,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.amber,
     opacity: 0.06,
   },
-  logoWrapper: { alignItems: 'center', marginBottom: 32 },
+  logoWrapper: { alignItems: 'center', marginBottom: 24 },
   logoImage: {
-    width: 88,
-    height: 88,
+    width: 90,
+    height: 90,
     borderRadius: Radius.xl,
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.sm,
   },
-  appName:   { fontSize: 22, fontWeight: '700', color: Colors.white },
+  appName:   { fontSize: 24, fontWeight: '800', color: Colors.white },
   appRole:   { fontSize: 13, color: Colors.slate400, marginTop: 2 },
 
   card: {
@@ -154,47 +241,39 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     borderWidth: 1,
     borderColor: Colors.darkBorder,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  cardTitle: { fontSize: 20, fontWeight: '700', color: Colors.white, marginBottom: Spacing.md },
+  cardTitle: { fontSize: 18, fontWeight: '700', color: Colors.white, marginBottom: Spacing.md },
 
-  devHint: {
-    backgroundColor: `${Colors.amber}18`,
-    borderWidth: 1,
-    borderColor: `${Colors.amber}40`,
-    borderRadius: Radius.sm,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    marginBottom: Spacing.md,
-  },
-  devHintText: { fontSize: 12, color: Colors.amber, fontWeight: '600' },
-
-  label: { fontSize: 13, fontWeight: '600', color: Colors.slate400, marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: '600', color: Colors.slate400, marginBottom: 4 },
   input: {
     backgroundColor: Colors.dark,
     borderWidth: 1,
     borderColor: Colors.darkBorder,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
-    paddingVertical: 14,
+    paddingVertical: 10,
     fontSize: 15,
     color: Colors.white,
+    marginBottom: Spacing.xs,
   },
-
   btn: {
     backgroundColor: Colors.amber,
     borderRadius: Radius.md,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginTop: Spacing.lg,
-    elevation: 6,
+    marginTop: Spacing.md,
+    elevation: 4,
   },
   btnDisabled: { opacity: 0.6 },
   btnText:     { color: Colors.dark, fontSize: 16, fontWeight: '700' },
 
-  footer: {
-    textAlign: 'center',
-    color: Colors.slate500,
-    fontSize: 12,
-    marginTop: 32,
-  },
+  toggleModeBtn: { marginTop: Spacing.md, alignItems: 'center', paddingVertical: 4 },
+  toggleModeText: { color: Colors.slate400, fontSize: 13 },
+  toggleModeLink: { color: Colors.amber, fontWeight: '700' },
+
+  footer: { textAlign: 'center', color: Colors.slate500, fontSize: 12, marginTop: 24 },
 });

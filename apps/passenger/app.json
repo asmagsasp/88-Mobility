@@ -22,15 +22,16 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#F59E0B"
+        "backgroundColor": "#0F172A"
       },
       "package": "com.eightyeightmobility.passenger",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
-      ]
+        "ACCESS_COARSE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {}
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

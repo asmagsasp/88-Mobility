@@ -1,27 +1,25 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { Driver } from '../types';
 
+interface RegisterDriverData {
+  name: string;
+  email: string;
+  phone: string;
+  vehicleModel: string;
+  vehiclePlate: string;
+  password: string;
+}
+
 interface AuthState {
   driver: Driver | null;
   isAuthenticated: boolean;
   isLoginLoading: boolean;
   login: (email: string, password: string) => void;
+  registerDriver: (data: RegisterDriverData) => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-
-const MOCK_DRIVER: Driver = {
-  id: 'driver-001',
-  name: 'Motorista Teste',
-  email: 'motorista@88mobility.com',
-  phone: '(61) 99999-0001',
-  vehicle: 'Toyota Corolla 2021',
-  vehiclePlate: 'ABC-1234',
-  rating: 4.8,
-  totalRides: 342,
-  isOnline: false,
-};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [driver, setDriver]               = useState<Driver | null>(null);
@@ -29,9 +27,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = (email: string, _password: string) => {
     setLoginLoading(true);
-    // Simula delay mínimo e loga imediatamente
     setTimeout(() => {
-      setDriver({ ...MOCK_DRIVER, name: email.split('@')[0] || 'Motorista', email });
+      setDriver({
+        id: `driver-${Date.now()}`,
+        name: email.split('@')[0] || 'Motorista Parceiro',
+        email,
+        phone: '(11) 98888-8888',
+        vehicle: 'Carro Cadastrado',
+        vehiclePlate: 'BRA8888',
+        rating: 5.0,
+        totalRides: 0,
+        isOnline: false,
+      });
+      setLoginLoading(false);
+    }, 400);
+  };
+
+  const registerDriver = (data: RegisterDriverData) => {
+    setLoginLoading(true);
+    setTimeout(() => {
+      setDriver({
+        id: `driver-${Date.now()}`,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        vehicle: data.vehicleModel,
+        vehiclePlate: data.vehiclePlate,
+        rating: 5.0,
+        totalRides: 0,
+        isOnline: false,
+      });
       setLoginLoading(false);
     }, 500);
   };
@@ -46,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: driver !== null,
       isLoginLoading,
       login,
+      registerDriver,
       logout,
     }}>
       {children}
