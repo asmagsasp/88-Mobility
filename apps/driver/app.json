@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "88 Mobility — Motorista",
+    "slug": "88mobility-driver",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.88mobility.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Para mostrar sua localização no mapa e receber corridas próximas.",
+        "NSLocationAlwaysUsageDescription": "Para receber corridas mesmo com o app em segundo plano."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#F59E0B"
+      },
+      "package": "com.88mobility.driver",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3000/api"
+    }
+  }
+}

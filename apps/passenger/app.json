@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "88 Mobility",
+    "slug": "88mobility-passenger",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.88mobility.passenger",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Para mostrar sua localização e encontrar motoristas próximos."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#F59E0B"
+      },
+      "package": "com.88mobility.passenger",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:3000/api",
+      "eas": {
+        "projectId": "de0ba798-751c-4aa5-bad1-33bbffd849f8"
+      }
+    }
+  }
+}

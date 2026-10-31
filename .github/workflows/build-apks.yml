@@ -1,0 +1,97 @@
+name: Build APKs (88 Mobility)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # 1. Build APK do Passageiro
+  # ============================================================
+  build-passenger:
+    name: Build APK - Passageiro
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/passenger/package-lock.json
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Dependências do Passageiro
+        working-directory: apps/passenger
+        run: npm ci
+
+      - name: Prebuild Android (Expo)
+        working-directory: apps/passenger
+        run: npx expo prebuild --platform android --clean
+
+      - name: Compilar APK (Release)
+        working-directory: apps/passenger/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK do Passageiro como Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: 88-Mobility-Passageiro-APK
+          path: apps/passenger/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+  # ============================================================
+  # 2. Build APK do Motorista
+  # ============================================================
+  build-driver:
+    name: Build APK - Motorista
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/driver/package-lock.json
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Dependências do Motorista
+        working-directory: apps/driver
+        run: npm ci
+
+      - name: Prebuild Android (Expo)
+        working-directory: apps/driver
+        run: npx expo prebuild --platform android --clean
+
+      - name: Compilar APK (Release)
+        working-directory: apps/driver/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK do Motorista como Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: 88-Mobility-Motorista-APK
+          path: apps/driver/android/app/build/outputs/apk/release/*.apk
+          retention-days: 14

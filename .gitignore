@@ -1,0 +1,25 @@
+# Node / dependências
+node_modules/
+.npm/
+
+# Builds e bundles
+dist/
+build/
+.expo/
+*.apk
+*.aab
+
+# Variáveis de ambiente com chaves locais
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# SO
+.DS_Store
+Thumbs.db
