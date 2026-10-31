@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.88mobility.driver",
+      "bundleIdentifier": "com.eightyeightmobility.driver",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Para mostrar sua localização no mapa e receber corridas próximas.",
         "NSLocationAlwaysUsageDescription": "Para receber corridas mesmo com o app em segundo plano."
@@ -25,7 +25,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#F59E0B"
       },
-      "package": "com.88mobility.driver",
+      "package": "com.eightyeightmobility.driver",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

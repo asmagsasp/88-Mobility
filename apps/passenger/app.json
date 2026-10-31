@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.88mobility.passenger",
+      "bundleIdentifier": "com.eightyeightmobility.passenger",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Para mostrar sua localização e encontrar motoristas próximos."
       }
@@ -24,7 +24,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#F59E0B"
       },
-      "package": "com.88mobility.passenger",
+      "package": "com.eightyeightmobility.passenger",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
