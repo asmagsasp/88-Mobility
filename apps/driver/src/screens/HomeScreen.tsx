@@ -249,8 +249,8 @@ export function HomeScreen() {
             <Text style={styles.avatarText}>{driver?.name?.charAt(0) ?? 'A'}</Text>
           </View>
           <View>
-            <Text style={styles.driverName}>{driver?.name || 'Abel Magalhães'}</Text>
-            <Text style={styles.vehicleText}>{driver?.vehiclePlate || 'BRA-8888'}</Text>
+            <Text style={styles.driverName}>{driver?.name || 'Motorista Parceiro'}</Text>
+            <Text style={styles.vehicleText}>{driver?.vehicle ? `${driver.vehicle} · ${driver.vehiclePlate}` : (driver?.vehiclePlate || 'Veículo Cadastrado')}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.logoutBtn} onPress={logout}>

@@ -17,10 +17,12 @@ interface AuthState {
   isLoginLoading: boolean;
   login: (email: string, password: string) => void;
   registerDriver: (data: RegisterDriverData) => void;
+  updateVehicle: (vehicle: string, vehiclePlate: string) => Promise<void>;
   logout: () => void;
 }
 
 const DRIVER_STORAGE_KEY = '@88mobility_active_driver';
+const DRIVERS_MAP_KEY    = '@88mobility_registered_drivers_map';
 
 const AuthContext = createContext<AuthState | null>(null);
 
@@ -45,18 +47,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = (email: string, _password: string) => {
     setLoginLoading(true);
     setTimeout(async () => {
-      const isAbel = email.toLowerCase().includes('abel') || email.toLowerCase().includes('magalhaes');
-      const driverData: Driver = {
-        id: `driver-abel-88`,
-        name: isAbel ? 'Abel Magalhães' : (email.split('@')[0] || 'Abel Magalhães'),
-        email,
+      const normalizedEmail = email.trim().toLowerCase();
+      let matchedDriver: Driver | null = null;
+
+      try {
+        const mapStr = await AsyncStorage.getItem(DRIVERS_MAP_KEY);
+        if (mapStr) {
+          const map = JSON.parse(mapStr);
+          if (map[normalizedEmail]) {
+            matchedDriver = map[normalizedEmail];
+          }
+        }
+        if (!matchedDriver) {
+          const activeStr = await AsyncStorage.getItem(DRIVER_STORAGE_KEY);
+          if (activeStr) {
+            const active = JSON.parse(activeStr);
+            if (active.email?.toLowerCase() === normalizedEmail) {
+              matchedDriver = active;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar motorista salvo:', err);
+      }
+
+      // Se encontrou dados reais previamente cadastrados pelo usuário, usa exatamente esses dados!
+      const driverData: Driver = matchedDriver || {
+        id: `driver-${Date.now()}`,
+        name: email.split('@')[0] || 'Abel Magalhães',
+        email: email.trim(),
         phone: '(11) 98888-8888',
-        vehicle: 'Toyota Corolla 2023',
+        vehicle: 'Carro Cadastrado',
         vehiclePlate: 'BRA-8888',
         rating: 5.0,
         totalRides: 0,
         isOnline: true,
       };
+
       setDriver(driverData);
       try {
         await AsyncStorage.setItem(DRIVER_STORAGE_KEY, JSON.stringify(driverData));
@@ -70,25 +97,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const registerDriver = (data: RegisterDriverData) => {
     setLoginLoading(true);
     setTimeout(async () => {
+      // Salva ESTRITAMENTE o que o motorista digitou nos campos
       const driverData: Driver = {
         id: `driver-${Date.now()}`,
-        name: data.name.trim() || 'Abel Magalhães',
+        name: data.name.trim() || 'Motorista Parceiro',
         email: data.email.trim(),
         phone: data.phone.trim() || '(11) 98888-8888',
-        vehicle: data.vehicleModel.trim() || 'Toyota Corolla 2023',
+        vehicle: data.vehicleModel.trim() || 'Carro Cadastrado',
         vehiclePlate: data.vehiclePlate.trim().toUpperCase() || 'BRA-8888',
         rating: 5.0,
         totalRides: 0,
         isOnline: true,
       };
+
       setDriver(driverData);
       try {
         await AsyncStorage.setItem(DRIVER_STORAGE_KEY, JSON.stringify(driverData));
+        const mapStr = await AsyncStorage.getItem(DRIVERS_MAP_KEY);
+        const map = mapStr ? JSON.parse(mapStr) : {};
+        map[data.email.trim().toLowerCase()] = driverData;
+        await AsyncStorage.setItem(DRIVERS_MAP_KEY, JSON.stringify(map));
       } catch (err) {
         console.warn('Erro ao salvar novo motorista:', err);
       }
       setLoginLoading(false);
-    }, 500);
+    }, 400);
+  };
+
+  // Permite atualizar os dados do veículo a qualquer momento pela tela de perfil
+  const updateVehicle = async (vehicle: string, vehiclePlate: string) => {
+    if (!driver) return;
+    const updated: Driver = {
+      ...driver,
+      vehicle: vehicle.trim(),
+      vehiclePlate: vehiclePlate.trim().toUpperCase(),
+    };
+    setDriver(updated);
+    try {
+      await AsyncStorage.setItem(DRIVER_STORAGE_KEY, JSON.stringify(updated));
+      const mapStr = await AsyncStorage.getItem(DRIVERS_MAP_KEY);
+      const map = mapStr ? JSON.parse(mapStr) : {};
+      map[driver.email.trim().toLowerCase()] = updated;
+      await AsyncStorage.setItem(DRIVERS_MAP_KEY, JSON.stringify(map));
+    } catch (e) {
+      console.warn('Erro ao atualizar veículo:', e);
+    }
   };
 
   const logout = async () => {
@@ -107,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoginLoading,
       login,
       registerDriver,
+      updateVehicle,
       logout,
     }}>
       {children}

@@ -401,23 +401,29 @@ export function HomeScreen() {
   };
 
   const contactDriver = () => {
+    const driverName = activeRide?.driverName || 'Motorista';
+    const rawPhone = (activeRide?.driverPhone || '11988888888').replace(/\D/g, '');
     Alert.alert(
-      'Contato com Abel Magalhães',
+      `Contato com ${driverName}`,
       'Escolha como deseja se comunicar:',
       [
-        { text: 'Ligar', onPress: () => Linking.openURL('tel:11988888888') },
-        { text: 'WhatsApp', onPress: () => Linking.openURL('https://wa.me/5511988888888') },
+        { text: 'Ligar', onPress: () => Linking.openURL(`tel:${rawPhone}`) },
+        { text: 'WhatsApp', onPress: () => Linking.openURL(`https://wa.me/55${rawPhone}`) },
         { text: 'Fechar', style: 'cancel' },
       ]
     );
   };
 
   // Marcadores mostrados no OpenStreetMap
+  const driverLabel = activeRide?.driverName
+    ? `${activeRide.driverName} (${activeRide.driverVehicle} · ${activeRide.driverPlate})`
+    : 'Motorista Parceiro Disponível';
+
   const mapMarkers = [
     {
       latitude: driverPos.latitude,
       longitude: driverPos.longitude,
-      title: 'Abel Magalhães (Corolla BRA-8888)',
+      title: driverLabel,
       type: 'driver' as const,
     },
     ...(destination ? [{
