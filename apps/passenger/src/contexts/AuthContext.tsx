@@ -37,26 +37,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       await new Promise(r => setTimeout(r, 600));
-      const mockPassenger: Passenger = {
-        id: 'passenger-001',
+      const passengerData: Passenger = {
+        id: `passenger-${Date.now()}`,
         name: email.split('@')[0] || 'Passageiro',
         email,
-        phone: '(61) 99888-0001',
-        totalRides: 28,
+        phone: '',
+        totalRides: 0,
       };
-      const mockToken = 'mock-passenger-token';
+      const authToken = `auth-session-${Date.now()}`;
 
       // Persiste no storage, mas não deixa falha de storage impedir o login
       try {
-        await AsyncStorage.setItem(TOKEN_KEY, mockToken);
-        await AsyncStorage.setItem(USER_KEY, JSON.stringify(mockPassenger));
+        await AsyncStorage.setItem(TOKEN_KEY, authToken);
+        await AsyncStorage.setItem(USER_KEY, JSON.stringify(passengerData));
       } catch (storageErr) {
         console.warn('[88] AsyncStorage indisponível, sessão só em memória:', storageErr);
       }
 
       // Atualiza o estado independente do AsyncStorage
-      setToken(mockToken);
-      setPassenger(mockPassenger);
+      setToken(authToken);
+      setPassenger(passengerData);
     } catch (err) {
       // Re-lança para o caller (LoginScreen) mostrar o Alert
       throw err;

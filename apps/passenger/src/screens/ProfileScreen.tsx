@@ -1,8 +1,11 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Switch } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+
+const PASSENGER_HISTORY_KEY = '@88mobility_passenger_history';
 
 const MENU_ITEMS = [
   { icon: '💳', label: 'Formas de pagamento', sub: 'Cartão, Pix, dinheiro' },
@@ -15,6 +18,21 @@ const MENU_ITEMS = [
 export function ProfileScreen() {
   const { passenger, logout } = useAuth();
   const { isDark, toggleTheme, colors } = useTheme();
+  const [realRidesCount, setRealRidesCount] = React.useState(0);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
+        if (stored) {
+          const list = JSON.parse(stored);
+          setRealRidesCount(list.length);
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar histórico no perfil:', e);
+      }
+    })();
+  }, []);
 
   const handleLogout = () => {
     Alert.alert('Sair do app?', '', [
@@ -30,9 +48,9 @@ export function ProfileScreen() {
         <View style={[styles.avatar, { backgroundColor: colors.amber }]}>
           <Text style={styles.avatarText}>{passenger?.name?.charAt(0) ?? 'P'}</Text>
         </View>
-        <Text style={styles.name}>{passenger?.name}</Text>
-        <Text style={styles.email}>{passenger?.email}</Text>
-        <Text style={styles.rides}>{passenger?.totalRides} corridas realizadas</Text>
+        <Text style={styles.name}>{passenger?.name || 'Passageiro'}</Text>
+        <Text style={styles.email}>{passenger?.email || ''}</Text>
+        <Text style={styles.rides}>{realRidesCount} {realRidesCount === 1 ? 'corrida realizada' : 'corridas realizadas'}</Text>
       </View>
 
       <View style={styles.body}>

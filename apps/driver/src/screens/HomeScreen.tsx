@@ -4,46 +4,25 @@ import {
   Alert, Animated, Dimensions, Switch, ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { OSMMap } from '../components/OSMMap';
 import type { Ride } from '../types';
+import type { CompletedDriverRide } from './EarningsScreen';
 
 const { height } = Dimensions.get('window');
-
-// Mock de corrida recebida — coordenadas serão ajustadas para perto do usuário
-const makeMockRide = (lat: number, lng: number): Ride => ({
-  id: 'r-mock-001',
-  passengerId: 'p1',
-  passengerName: 'Ana Silva',
-  origin:      { latitude: lat + 0.005, longitude: lng + 0.005, address: 'Perto de você' },
-  destination: { latitude: lat - 0.010, longitude: lng - 0.008, address: 'Destino próximo' },
-  distanceKm: 8.4,
-  pricePerKm: 2.50,
-  surgeFee: 0,
-  totalAmount: 21.00,
-  driverShare: 18.48,
-  platformShare: 2.52,
-  status: 'searching',
-  requestedAt: new Date().toISOString(),
-  estimatedMinutes: 12,
-});
-
-// Região padrão enquanto GPS carrega
-const FALLBACK_COORDS = {
-  latitude: -15.7942,
-  longitude: -47.8822,
-};
+const COMPLETED_RIDES_KEY = '@88mobility_driver_completed_rides';
 
 const formatBRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
  * Tela principal do motorista:
- * - Mapa centrado na localização real do usuário
+ * - Mapa centrado na localização real GPS
  * - Toggle Online/Offline
- * - Popup de corrida disponível (aceitar/recusar)
- * - Ganhos do dia
+ * - Zero dados fictícios: ganhos e corridas calculados estritamente com base no histórico real
+ * - Ao recusar uma corrida, ela NUNCA mais é reoferecida
  */
 export function HomeScreen() {
   const { driver, logout } = useAuth();
@@ -52,7 +31,34 @@ export function HomeScreen() {
   const [isOnline, setIsOnline]       = useState(false);
   const [rideRequest, setRideRequest] = useState<Ride | null>(null);
   const [activeRide, setActiveRide]   = useState<Ride | null>(null);
+  const [completedToday, setCompletedToday] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
+
+  // Conjunto de IDs de corridas que o motorista já recusou para JAMAIS reoferecê-las
+  const rejectedRideIds = useRef<Set<string>>(new Set());
   const slideAnim = useRef(new Animated.Value(300)).current;
+
+  // Carrega ganhos reais do dia a partir do storage
+  const loadTodayStats = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(COMPLETED_RIDES_KEY);
+      if (stored) {
+        const rides: CompletedDriverRide[] = JSON.parse(stored);
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const todayRides = rides.filter(r => (now - r.timestamp) <= oneDayMs);
+        const total = todayRides.reduce((acc, r) => acc + r.earning, 0);
+        setCompletedToday({ total, count: todayRides.length });
+      } else {
+        setCompletedToday({ total: 0, count: 0 });
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar estatísticas do dia:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadTodayStats();
+  }, [activeRide]);
 
   // Solicita permissão e obtém localização real
   useEffect(() => {
@@ -77,51 +83,80 @@ export function HomeScreen() {
     return () => { isMounted = false; };
   }, []);
 
-  // Simula recebimento de corrida após 3s quando online
-  useEffect(() => {
-    if (!isOnline || rideRequest || activeRide || !gpsReady) return;
-    const t = setTimeout(() => {
-      const mockRide = makeMockRide(coords.lat, coords.lng);
-      setRideRequest(mockRide);
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65 }).start();
-    }, 3000);
-    return () => clearTimeout(t);
-  }, [isOnline, rideRequest, activeRide, gpsReady, coords]);
-
-  const dismissRequest = () => {
+  // Recusar corrida: fecha popup e marca ID como permanentemente recusada
+  const dismissRequest = (rideId?: string) => {
+    if (rideId) {
+      rejectedRideIds.current.add(rideId);
+    }
     Animated.timing(slideAnim, { toValue: 300, duration: 250, useNativeDriver: true }).start(() => {
       setRideRequest(null);
       slideAnim.setValue(300);
     });
   };
 
+  // Aceitar corrida
   const acceptRide = () => {
     if (!rideRequest) return;
     setActiveRide({ ...rideRequest, status: 'arriving' });
-    dismissRequest();
+    Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start(() => {
+      setRideRequest(null);
+      slideAnim.setValue(300);
+    });
   };
 
-  const completeRide = () => {
-    Alert.alert('Corrida concluída! 🎉', `Você ganhou ${formatBRL(activeRide?.driverShare ?? 0)}`, [
-      { text: 'OK', onPress: () => setActiveRide(null) },
+  // Concluir corrida e persistir ganho real no histórico
+  const completeRide = async () => {
+    if (!activeRide) return;
+    const earning = activeRide.driverShare;
+
+    const newCompleted: CompletedDriverRide = {
+      id: activeRide.id || `ride-${Date.now()}`,
+      date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(),
+      origin: activeRide.origin.address || 'Embarque do passageiro',
+      destination: activeRide.destination.address || 'Destino final',
+      km: activeRide.distanceKm,
+      earning,
+    };
+
+    try {
+      const stored = await AsyncStorage.getItem(COMPLETED_RIDES_KEY);
+      const list: CompletedDriverRide[] = stored ? JSON.parse(stored) : [];
+      list.unshift(newCompleted);
+      await AsyncStorage.setItem(COMPLETED_RIDES_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Erro ao salvar corrida concluída:', e);
+    }
+
+    Alert.alert('Corrida concluída! 🎉', `Você recebeu ${formatBRL(earning)} líquido (88% do valor total).`, [
+      {
+        text: 'OK',
+        onPress: () => {
+          setActiveRide(null);
+          loadTodayStats();
+        },
+      },
     ]);
   };
 
   const toggleOnline = (val: boolean) => {
     setIsOnline(val);
-    if (!val) { setRideRequest(null); slideAnim.setValue(300); }
+    if (!val) {
+      setRideRequest(null);
+      slideAnim.setValue(300);
+    }
   };
 
   return (
     <View style={styles.container}>
-      {/* Mapa 100% nativo OpenStreetMap (nunca fecha ou trava por falta de Google API Key) */}
+      {/* Mapa nativo OpenStreetMap (Leaflet) sem dependência de serviços do Google */}
       <OSMMap
         latitude={coords.lat}
         longitude={coords.lng}
         zoom={15}
         markers={activeRide ? [
-          { latitude: activeRide.origin.latitude, longitude: activeRide.origin.longitude, title: 'Passageiro' },
-          { latitude: activeRide.destination.latitude, longitude: activeRide.destination.longitude, title: 'Destino' },
+          { latitude: activeRide.origin.latitude, longitude: activeRide.origin.longitude, title: 'Embarque do Passageiro' },
+          { latitude: activeRide.destination.latitude, longitude: activeRide.destination.longitude, title: 'Destino Final' },
         ] : []}
       />
 
@@ -129,7 +164,7 @@ export function HomeScreen() {
       {!gpsReady && (
         <View style={styles.gpsOverlay}>
           <ActivityIndicator color={Colors.amber} size="large" />
-          <Text style={styles.gpsText}>Obtendo localização...</Text>
+          <Text style={styles.gpsText}>Sincronizando GPS do motorista...</Text>
         </View>
       )}
 
@@ -137,11 +172,11 @@ export function HomeScreen() {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatarBadge}>
-            <Text style={styles.avatarText}>{driver?.name?.charAt(0) ?? 'M'}</Text>
+            <Text style={styles.avatarText}>{driver?.name?.charAt(0) ?? 'A'}</Text>
           </View>
           <View>
-            <Text style={styles.driverName}>{driver?.name}</Text>
-            <Text style={styles.vehicleText}>{driver?.vehiclePlate}</Text>
+            <Text style={styles.driverName}>{driver?.name || 'Abel Magalhães'}</Text>
+            <Text style={styles.vehicleText}>{driver?.vehiclePlate || 'BRA-8888'}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
@@ -155,10 +190,10 @@ export function HomeScreen() {
         <View style={styles.onlineRow}>
           <View>
             <Text style={styles.onlineLabel}>
-              {isOnline ? '🟢 Online — aguardando corrida' : '⚫ Offline'}
+              {isOnline ? '🟢 Online — aguardando chamadas' : '⚫ Offline — desconectado'}
             </Text>
             {isOnline && !activeRide && (
-              <Text style={styles.onlineSub}>Procurando corridas próximas...</Text>
+              <Text style={styles.onlineSub}>Você receberá chamadas de passageiros próximos</Text>
             )}
           </View>
           <Switch
@@ -190,34 +225,34 @@ export function HomeScreen() {
           </View>
         )}
 
-        {/* Ganhos do dia */}
+        {/* Ganhos REAIS do dia */}
         {!activeRide && (
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>R$ 84,00</Text>
+              <Text style={styles.statValue}>{formatBRL(completedToday.total)}</Text>
               <Text style={styles.statLabel}>Hoje</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>12</Text>
+              <Text style={styles.statValue}>{completedToday.count}</Text>
               <Text style={styles.statLabel}>Corridas</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>4.8 ⭐</Text>
+              <Text style={styles.statValue}>5.0 ⭐</Text>
               <Text style={styles.statLabel}>Avaliação</Text>
             </View>
           </View>
         )}
       </View>
 
-      {/* Popup de nova corrida */}
+      {/* Popup de nova corrida recebida */}
       {rideRequest && (
         <Animated.View
           style={[styles.rideRequestSheet, { transform: [{ translateY: slideAnim }] }]}
         >
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Nova corrida disponível! 🚀</Text>
+          <Text style={styles.sheetTitle}>Chamada de Corrida Disponível 🚀</Text>
 
           <View style={styles.rideInfo}>
             <View style={styles.rideInfoRow}>
@@ -244,22 +279,25 @@ export function HomeScreen() {
             </View>
             <View style={styles.rideMetaItem}>
               <Text style={styles.rideMetaValue}>{rideRequest.estimatedMinutes} min</Text>
-              <Text style={styles.rideMetaLabel}>Estimado</Text>
+              <Text style={styles.rideMetaLabel}>Tempo</Text>
             </View>
             <View style={styles.rideMetaItem}>
               <Text style={[styles.rideMetaValue, { color: Colors.amber }]}>
                 {formatBRL(rideRequest.driverShare)}
               </Text>
-              <Text style={styles.rideMetaLabel}>Seus ganhos</Text>
+              <Text style={styles.rideMetaLabel}>Seu repasse (88%)</Text>
             </View>
           </View>
 
           <View style={styles.rideActions}>
-            <TouchableOpacity style={styles.declineBtn} onPress={dismissRequest}>
+            <TouchableOpacity
+              style={styles.declineBtn}
+              onPress={() => dismissRequest(rideRequest.id)}
+            >
               <Text style={styles.declineBtnText}>Recusar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.acceptBtn} onPress={acceptRide}>
-              <Text style={styles.acceptBtnText}>Aceitar</Text>
+              <Text style={styles.acceptBtnText}>Aceitar Corrida</Text>
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -298,48 +336,55 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.amber, alignItems: 'center', justifyContent: 'center',
   },
   avatarText:  { fontSize: 18, fontWeight: '700', color: Colors.dark },
-  driverName:  { fontSize: 14, fontWeight: '600', color: Colors.white },
+  driverName:  { fontSize: 15, fontWeight: '700', color: Colors.white },
   vehicleText: { fontSize: 12, color: Colors.slate400, marginTop: 1 },
-  logoutBtn:   { padding: 8 },
+  logoutBtn:   { paddingVertical: 4, paddingHorizontal: 8 },
   logoutText:  { color: Colors.slate400, fontSize: 13 },
 
-  // Bottom panel
+  // Painel inferior
   bottomPanel: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 0, left: 0, right: 0,
     backgroundColor: Colors.darkCard,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: Spacing.lg,
-    paddingBottom: 32,
+    paddingBottom: 28,
     borderTopWidth: 1,
     borderTopColor: Colors.darkBorder,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 12,
   },
   onlineRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  onlineLabel: { fontSize: 15, fontWeight: '600', color: Colors.white },
+  onlineLabel: { fontSize: 15, fontWeight: '700', color: Colors.white },
   onlineSub:   { fontSize: 12, color: Colors.slate400, marginTop: 2 },
 
-  // Active ride
+  // Corrida ativa
   activeRideCard: {
     backgroundColor: Colors.dark,
     borderRadius: Radius.lg,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: Colors.amber + '40',
-    marginTop: Spacing.sm,
+    borderColor: Colors.amber + '60',
   },
-  activeRideHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  activeRideTitle:  { fontSize: 14, fontWeight: '600', color: Colors.white },
-  activeRideEarning:{ fontSize: 20, fontWeight: '800', color: Colors.amber },
-  activeRideRoute:  { fontSize: 13, color: Colors.slate400, marginBottom: 4 },
-  activeRideDist:   { fontSize: 12, color: Colors.slate500, marginBottom: Spacing.md },
+  activeRideHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  activeRideTitle:   { fontSize: 14, fontWeight: '700', color: Colors.white },
+  activeRideEarning: { fontSize: 20, fontWeight: '800', color: Colors.amber },
+  activeRideRoute:   { fontSize: 13, color: Colors.slate200, marginBottom: 4 },
+  activeRideDist:    { fontSize: 12, color: Colors.slate500, marginBottom: Spacing.md },
   completeBtn: {
     backgroundColor: Colors.success,
     borderRadius: Radius.md,
@@ -348,30 +393,31 @@ const styles = StyleSheet.create({
   },
   completeBtnText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
 
-  // Stats
+  // Stats reais
   statsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: Spacing.sm,
+    backgroundColor: Colors.dark,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.darkBorder,
   },
   statItem:    { flex: 1, alignItems: 'center' },
-  statValue:   { fontSize: 16, fontWeight: '700', color: Colors.white },
+  statValue:   { fontSize: 18, fontWeight: '800', color: Colors.white },
   statLabel:   { fontSize: 11, color: Colors.slate400, marginTop: 2 },
-  statDivider: { width: 1, height: 32, backgroundColor: Colors.darkBorder },
+  statDivider: { width: 1, backgroundColor: Colors.darkBorder },
 
-  // Ride request sheet
+  // Popup de chamada recebida
   rideRequestSheet: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 0, left: 0, right: 0,
     backgroundColor: Colors.darkCard,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    padding: Spacing.lg,
+    padding: Spacing.xl,
     paddingBottom: 36,
-    borderTopWidth: 1,
-    borderTopColor: Colors.darkBorder,
+    borderTopWidth: 2,
+    borderTopColor: Colors.amber,
     shadowColor: '#000',
     shadowOpacity: 0.5,
     shadowRadius: 24,
@@ -379,69 +425,63 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   sheetHandle: {
-    width: 40, height: 4, borderRadius: 2,
+    width: 36, height: 4, borderRadius: 2,
     backgroundColor: Colors.darkBorder, alignSelf: 'center', marginBottom: Spacing.md,
   },
-  sheetTitle: { fontSize: 18, fontWeight: '700', color: Colors.white, marginBottom: Spacing.md },
-
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: Colors.white, marginBottom: Spacing.md, textAlign: 'center' },
   rideInfo: {
     backgroundColor: Colors.dark,
-    borderRadius: Radius.lg,
+    borderRadius: Radius.md,
     padding: Spacing.md,
-    marginBottom: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.darkBorder,
+    marginBottom: Spacing.md,
   },
-  rideInfoRow:     { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  rideInfoIcon:    { fontSize: 18, marginTop: 2 },
-  rideInfoLabel:   { fontSize: 11, color: Colors.slate500, marginBottom: 2 },
-  rideInfoValue:   { fontSize: 14, color: Colors.white, fontWeight: '500' },
-  rideInfoDivider: { height: 1, backgroundColor: Colors.darkBorder, marginVertical: Spacing.sm, marginLeft: 28 },
+  rideInfoRow:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  rideInfoIcon:    { fontSize: 18 },
+  rideInfoLabel:   { fontSize: 11, color: Colors.slate500 },
+  rideInfoValue:   { fontSize: 13, color: Colors.white, fontWeight: '600', marginTop: 1 },
+  rideInfoDivider: { height: 1, backgroundColor: Colors.darkBorder, marginVertical: Spacing.xs, marginLeft: 28 },
 
   rideMeta: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    marginBottom: Spacing.lg,
+    paddingVertical: Spacing.sm,
     backgroundColor: Colors.dark,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    marginBottom: Spacing.md,
+    borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.darkBorder,
   },
   rideMetaItem:  { alignItems: 'center' },
-  rideMetaValue: { fontSize: 18, fontWeight: '700', color: Colors.white },
-  rideMetaLabel: { fontSize: 11, color: Colors.slate400, marginTop: 2 },
+  rideMetaValue: { fontSize: 16, fontWeight: '800', color: Colors.white },
+  rideMetaLabel: { fontSize: 11, color: Colors.slate500, marginTop: 2 },
 
   rideActions: { flexDirection: 'row', gap: Spacing.md },
   declineBtn: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: Colors.darkBorder,
+    backgroundColor: Colors.danger + '20',
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.danger + '50',
   },
-  declineBtnText: { color: Colors.slate200, fontWeight: '600', fontSize: 15 },
+  declineBtnText: { color: Colors.danger, fontWeight: '700', fontSize: 15 },
   acceptBtn: {
     flex: 2,
     backgroundColor: Colors.amber,
     borderRadius: Radius.md,
     paddingVertical: 14,
     alignItems: 'center',
-    shadowColor: Colors.amber,
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
   },
-  acceptBtnText: { color: Colors.dark, fontWeight: '700', fontSize: 16 },
+  acceptBtnText: { color: Colors.dark, fontWeight: '800', fontSize: 15 },
 
-  // GPS loading overlay
   gpsOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: Colors.dark + 'CC',
+    backgroundColor: 'rgba(15,23,42,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  gpsText: { color: Colors.slate400, marginTop: 12, fontSize: 14 },
+  gpsText: { color: Colors.slate200, marginTop: 12, fontSize: 14, fontWeight: '500' },
 });

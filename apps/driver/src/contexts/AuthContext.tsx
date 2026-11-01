@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         vehicle: 'Toyota Corolla 2023',
         vehiclePlate: 'BRA-8888',
         rating: 5.0,
-        totalRides: 142,
+        totalRides: 0,
         isOnline: true,
       };
       setDriver(driverData);

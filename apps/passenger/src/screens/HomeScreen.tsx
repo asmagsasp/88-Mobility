@@ -4,11 +4,13 @@ import {
   StyleSheet, FlatList, Alert, ActivityIndicator, Image, Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { OSMMap } from '../components/OSMMap';
 import type { Ride, Location as RideLocation } from '../types';
+import type { PassengerRideHistoryItem } from './HistoryScreen';
 
 type Step = 'idle' | 'selecting_destination' | 'confirming' | 'searching' | 'active';
 
@@ -20,13 +22,8 @@ export interface AddressSuggestion {
   lng: number;
 }
 
-// Sugestões rápidas de atalho
-const QUICK_DESTINATIONS: AddressSuggestion[] = [
-  { id: 'q1', label: 'Centro da Cidade', address: 'Área Central Comercial', lat: -15.7942, lng: -47.8822 },
-  { id: 'q2', label: 'Shopping Principal', address: 'Avenida Comercial, 1000', lat: -15.7399, lng: -47.9109 },
-  { id: 'q3', label: 'Aeroporto', address: 'Terminal de Passageiros', lat: -15.8711, lng: -47.9172 },
-  { id: 'q4', label: 'Hospital Regional', address: 'Setor Hospitalar Sul', lat: -15.8122, lng: -47.9148 },
-];
+const RECENT_DESTS_KEY = '@88mobility_recent_destinations';
+const PASSENGER_HISTORY_KEY = '@88mobility_passenger_history';
 
 const PRICE_PER_KM = 2.50;
 const SURGE_FEE    = 2.00; // Horário de pico (se aplicável)
@@ -54,7 +51,7 @@ function getHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: 
  * - Mapa OpenStreetMap com localização ao vivo e motorista Abel visível
  * - Combo com autocompletar dinâmico de endereços via OpenStreetMap Nominatim
  * - Cálculo transparente de quilometragem e divisão 88/12 + taxa de manutenção
- * - Chamada do motorista real Abel Magalhães (Toyota Corolla BRA-8888)
+ * - Zero dados fictícios: histórico e destinos recentes 100% reais do usuário
  */
 export function HomeScreen() {
   const { passenger, logout } = useAuth();
@@ -65,7 +62,8 @@ export function HomeScreen() {
   const [step, setStep]                   = useState<Step>('idle');
   const [search, setSearch]               = useState('');
   const [isSearchingAddress, setIsSearching] = useState(false);
-  const [suggestions, setSuggestions]     = useState<AddressSuggestion[]>(QUICK_DESTINATIONS);
+  const [suggestions, setSuggestions]     = useState<AddressSuggestion[]>([]);
+  const [recentDestinations, setRecentDestinations] = useState<AddressSuggestion[]>([]);
   const [destination, setDest]            = useState<AddressSuggestion | null>(null);
   const [activeRide, setActiveRide]       = useState<Partial<Ride> | null>(null);
 
@@ -74,6 +72,20 @@ export function HomeScreen() {
     latitude: coords.lat + 0.0032,
     longitude: coords.lng + 0.0028,
   };
+
+  // Carrega destinos recentes reais do passageiro
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await AsyncStorage.getItem(RECENT_DESTS_KEY);
+        if (stored) {
+          setRecentDestinations(JSON.parse(stored));
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar destinos recentes:', e);
+      }
+    })();
+  }, []);
 
   // Solicita permissão e obtém GPS real do dispositivo
   useEffect(() => {
@@ -103,7 +115,7 @@ export function HomeScreen() {
   useEffect(() => {
     const trimmed = search.trim();
     if (trimmed.length < 3) {
-      setSuggestions(QUICK_DESTINATIONS);
+      setSuggestions(recentDestinations);
       setIsSearching(false);
       return;
     }
@@ -139,12 +151,11 @@ export function HomeScreen() {
           });
           setSuggestions(parsed);
         } else {
-          // Fallback mantendo o que digitou como opção personalizada
           setSuggestions([
             {
-              id: 'custom-entry',
+              id: `custom-${Date.now()}`,
               label: trimmed,
-              address: 'Endereço informado pelo usuário',
+              address: 'Endereço digitado pelo passageiro',
               lat: coords.lat + 0.02,
               lng: coords.lng + 0.02,
             },
@@ -158,7 +169,7 @@ export function HomeScreen() {
     }, 400);
 
     return () => clearTimeout(timeoutId);
-  }, [search, coords]);
+  }, [search, coords, recentDestinations]);
 
   // Distância calculada e precificação exata do 88 Mobility
   const distanceKm = destination
@@ -168,10 +179,20 @@ export function HomeScreen() {
   const totalAmount = kmAmount + SURGE_FEE + PLATFORM_FEE;
   const driverShare = totalAmount * 0.88;
 
-  const selectDestination = (item: AddressSuggestion) => {
+  const selectDestination = async (item: AddressSuggestion) => {
     setDest(item);
     setSearch(item.label);
     setStep('confirming');
+
+    // Salva nos destinos recentes reais
+    try {
+      const filtered = recentDestinations.filter(d => d.id !== item.id);
+      const updated = [item, ...filtered].slice(0, 5);
+      setRecentDestinations(updated);
+      await AsyncStorage.setItem(RECENT_DESTS_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.warn('Erro ao salvar destino recente:', e);
+    }
   };
 
   const requestRide = () => {
@@ -194,13 +215,72 @@ export function HomeScreen() {
     }, 2200);
   };
 
+  // Concluir corrida e salvar no histórico real do passageiro
+  const completeRide = async () => {
+    if (!activeRide || !destination) return;
+
+    const historyItem: PassengerRideHistoryItem = {
+      id: activeRide.id || `ride-${Date.now()}`,
+      date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.now(),
+      origin: 'Sua localização',
+      destination: destination.label,
+      km: distanceKm,
+      total: totalAmount,
+      driverName: 'Abel Magalhães',
+      status: 'completed',
+    };
+
+    try {
+      const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
+      const list: PassengerRideHistoryItem[] = stored ? JSON.parse(stored) : [];
+      list.unshift(historyItem);
+      await AsyncStorage.setItem(PASSENGER_HISTORY_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Erro ao registrar histórico de corrida:', e);
+    }
+
+    Alert.alert('Viagem Concluída! 🎉', `Obrigado por viajar com Abel Magalhães na 88 Mobility. Valor: ${formatBRL(totalAmount)}`, [
+      {
+        text: 'OK',
+        onPress: () => {
+          setActiveRide(null);
+          setStep('idle');
+          setDest(null);
+          setSearch('');
+        },
+      },
+    ]);
+  };
+
   const cancelRide = () => {
     Alert.alert('Cancelar corrida?', 'Tem certeza que deseja cancelar?', [
       { text: 'Não', style: 'cancel' },
       {
         text: 'Sim, cancelar',
         style: 'destructive',
-        onPress: () => {
+        onPress: async () => {
+          if (activeRide && destination) {
+            const cancelItem: PassengerRideHistoryItem = {
+              id: activeRide.id || `ride-${Date.now()}`,
+              date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+              timestamp: Date.now(),
+              origin: 'Sua localização',
+              destination: destination.label,
+              km: distanceKm,
+              total: totalAmount,
+              driverName: 'Abel Magalhães',
+              status: 'cancelled',
+            };
+            try {
+              const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
+              const list: PassengerRideHistoryItem[] = stored ? JSON.parse(stored) : [];
+              list.unshift(cancelItem);
+              await AsyncStorage.setItem(PASSENGER_HISTORY_KEY, JSON.stringify(list));
+            } catch (e) {
+              console.warn('Erro ao salvar cancelamento:', e);
+            }
+          }
           setActiveRide(null);
           setStep('idle');
           setDest(null);
@@ -327,6 +407,9 @@ export function HomeScreen() {
             <TouchableOpacity style={styles.contactBtn} onPress={contactDriver}>
               <Text style={styles.contactBtnText}>📞 Falar com Abel</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.finishBtn} onPress={completeRide}>
+              <Text style={styles.finishBtnText}>Concluir Viagem</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={cancelRide}>
               <Text style={styles.cancelBtnText}>Cancelar</Text>
             </TouchableOpacity>
@@ -380,33 +463,41 @@ export function HomeScreen() {
           {step === 'selecting_destination' && (
             <View style={styles.suggestionsContainer}>
               <Text style={[styles.suggestionsHeader, { color: colors.textSecondary }]}>
-                {search.trim().length >= 3 ? 'Endereços Encontrados:' : 'Destinos Sugeridos:'}
+                {search.trim().length >= 3 ? 'Endereços Encontrados:' : 'Destinos Recentes:'}
               </Text>
-              <FlatList
-                data={suggestions}
-                keyExtractor={i => i.id}
-                style={styles.suggestions}
-                keyboardShouldPersistTaps="handled"
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.suggestionItem}
-                    onPress={() => selectDestination(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.suggestionIcon}>📍</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.suggestionLabel, { color: colors.text }]} numberOfLines={1}>
-                        {item.label}
-                      </Text>
-                      <Text style={[styles.suggestionAddress, { color: colors.textSecondary }]} numberOfLines={2}>
-                        {item.address}
-                      </Text>
-                    </View>
-                    <Text style={{ color: Colors.amber, fontSize: 16 }}>→</Text>
-                  </TouchableOpacity>
-                )}
-                ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: colors.border }]} />}
-              />
+              {suggestions.length === 0 ? (
+                <View style={styles.emptySuggestions}>
+                  <Text style={[styles.emptySuggestionsText, { color: colors.textSecondary }]}>
+                    Digite o nome da rua, praça ou local para autocompletar.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={suggestions}
+                  keyExtractor={i => i.id}
+                  style={styles.suggestions}
+                  keyboardShouldPersistTaps="handled"
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.suggestionItem}
+                      onPress={() => selectDestination(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.suggestionIcon}>📍</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.suggestionLabel, { color: colors.text }]} numberOfLines={1}>
+                          {item.label}
+                        </Text>
+                        <Text style={[styles.suggestionAddress, { color: colors.textSecondary }]} numberOfLines={2}>
+                          {item.address}
+                        </Text>
+                      </View>
+                      <Text style={{ color: Colors.amber, fontSize: 16 }}>→</Text>
+                    </TouchableOpacity>
+                  )}
+                  ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: colors.border }]} />}
+                />
+              )}
             </View>
           )}
 
@@ -468,23 +559,33 @@ export function HomeScreen() {
             </View>
           )}
 
-          {/* Atalhos Rápidos no estado inicial */}
+          {/* Atalhos com destinos REAIS recentes */}
           {step === 'idle' && (
             <View style={styles.quickActions}>
-              <Text style={[styles.quickTitle, { color: colors.textSecondary }]}>Destinos Frequentes</Text>
-              <View style={styles.quickRow}>
-                {QUICK_DESTINATIONS.map((q) => (
-                  <TouchableOpacity
-                    key={q.id}
-                    style={[styles.quickItem, { backgroundColor: colors.slate100, borderColor: colors.border }]}
-                    onPress={() => selectDestination(q)}
-                  >
-                    <Text style={styles.quickIcon}>📍</Text>
-                    <Text style={[styles.quickLabel, { color: colors.text }]} numberOfLines={1}>{q.label}</Text>
-                    <Text style={[styles.quickSub, { color: colors.textSecondary }]} numberOfLines={1}>{q.address}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              {recentDestinations.length > 0 ? (
+                <>
+                  <Text style={[styles.quickTitle, { color: colors.textSecondary }]}>Destinos Recentes</Text>
+                  <View style={styles.quickRow}>
+                    {recentDestinations.slice(0, 4).map((q) => (
+                      <TouchableOpacity
+                        key={q.id}
+                        style={[styles.quickItem, { backgroundColor: colors.slate100, borderColor: colors.border }]}
+                        onPress={() => selectDestination(q)}
+                      >
+                        <Text style={styles.quickIcon}>📍</Text>
+                        <Text style={[styles.quickLabel, { color: colors.text }]} numberOfLines={1}>{q.label}</Text>
+                        <Text style={[styles.quickSub, { color: colors.textSecondary }]} numberOfLines={1}>{q.address}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              ) : (
+                <View style={styles.hintContainer}>
+                  <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+                    💡 Digite o endereço ou local no campo acima para buscar no mapa em tempo real.
+                  </Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -569,6 +670,8 @@ const styles = StyleSheet.create({
   suggestionLabel:      { fontSize: 14, fontWeight: '600' },
   suggestionAddress:    { fontSize: 12, marginTop: 2 },
   separator:            { height: 1 },
+  emptySuggestions:     { paddingVertical: 16, alignItems: 'center' },
+  emptySuggestionsText: { fontSize: 13 },
 
   // Confirmação
   confirmPanel: { gap: Spacing.sm },
@@ -622,6 +725,8 @@ const styles = StyleSheet.create({
   quickIcon:  { fontSize: 18, marginBottom: 2 },
   quickLabel: { fontSize: 13, fontWeight: '600' },
   quickSub:   { fontSize: 11, marginTop: 1 },
+  hintContainer: { paddingVertical: 12, alignItems: 'center' },
+  hintText:      { fontSize: 13, textAlign: 'center' },
 
   // Buscando motorista
   searchingSheet: {
@@ -699,25 +804,33 @@ const styles = StyleSheet.create({
   feeNotice:        { fontSize: 11, color: Colors.success, fontWeight: '600', marginTop: 2 },
   activeTotalValue: { fontSize: 22, fontWeight: '800' },
 
-  actionRow:  { flexDirection: 'row', gap: 10, marginTop: 4 },
+  actionRow:  { flexDirection: 'row', gap: 8, marginTop: 4 },
   contactBtn: {
     flex: 1,
     backgroundColor: Colors.amber,
     borderRadius: Radius.md,
-    paddingVertical: 13,
+    paddingVertical: 12,
     alignItems: 'center',
   },
-  contactBtnText: { color: Colors.slate900, fontWeight: '700', fontSize: 14 },
+  contactBtnText: { color: Colors.slate900, fontWeight: '700', fontSize: 13 },
+  finishBtn: {
+    flex: 1,
+    backgroundColor: Colors.success,
+    borderRadius: Radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  finishBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
   cancelBtn: {
     flex: 1,
     backgroundColor: Colors.dangerLight,
     borderRadius: Radius.md,
-    paddingVertical: 13,
+    paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#FECACA',
   },
-  cancelBtnText: { color: Colors.danger, fontWeight: '700', fontSize: 14 },
+  cancelBtnText: { color: Colors.danger, fontWeight: '700', fontSize: 13 },
 
   gpsOverlay: {
     ...StyleSheet.absoluteFill,
