@@ -3,16 +3,16 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'rea
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 
-const MENU_ITEMS = [
-  { icon: '🚗', label: 'Meu veículo', sub: 'Toyota Corolla 2021 · ABC-1234' },
-  { icon: '📋', label: 'Documentos', sub: 'CNH, CRLV, antecedentes' },
-  { icon: '💳', label: 'Dados bancários', sub: 'Para receber seus ganhos' },
-  { icon: '🔔', label: 'Notificações', sub: 'Avisos de corridas e pagamentos' },
-  { icon: '❓', label: 'Ajuda e suporte', sub: 'Central de atendimento' },
-];
-
 export function ProfileScreen() {
   const { driver, logout } = useAuth();
+
+  const menuItems = [
+    { icon: '🚗', label: 'Meu veículo', sub: `${driver?.vehicle ?? 'Toyota Corolla 2023'} · ${driver?.vehiclePlate ?? 'BRA-8888'}` },
+    { icon: '📋', label: 'Documentos', sub: 'CNH, CRLV, antecedentes' },
+    { icon: '💳', label: 'Dados bancários', sub: 'Para receber seus ganhos' },
+    { icon: '🔔', label: 'Notificações', sub: 'Avisos de corridas e pagamentos' },
+    { icon: '❓', label: 'Ajuda e suporte', sub: 'Central de atendimento' },
+  ];
 
   const handleLogout = () => {
     Alert.alert('Sair do app?', 'Você será desconectado.', [
@@ -57,7 +57,7 @@ export function ProfileScreen() {
 
       {/* Menu */}
       <View style={styles.menu}>
-        {MENU_ITEMS.map((item, i) => (
+        {menuItems.map((item, i) => (
           <TouchableOpacity key={i} style={styles.menuItem} activeOpacity={0.7}>
             <Text style={styles.menuIcon}>{item.icon}</Text>
             <View style={{ flex: 1 }}>

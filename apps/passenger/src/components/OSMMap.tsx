@@ -2,16 +2,19 @@ import React from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
 
+interface MarkerItem {
+  latitude: number;
+  longitude: number;
+  title?: string;
+  color?: string;
+  type?: 'driver' | 'destination' | 'default';
+}
+
 interface OSMMapProps {
   latitude: number;
   longitude: number;
   zoom?: number;
-  markers?: Array<{
-    latitude: number;
-    longitude: number;
-    title?: string;
-    color?: string;
-  }>;
+  markers?: MarkerItem[];
 }
 
 /**
@@ -19,6 +22,8 @@ interface OSMMapProps {
  * Não depende do Google Play Services, nunca trava nem fecha por falta de API Key.
  */
 export function OSMMap({ latitude, longitude, zoom = 15, markers = [] }: OSMMapProps) {
+  const serializedMarkers = JSON.stringify(markers);
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -42,6 +47,40 @@ export function OSMMap({ latitude, longitude, zoom = 15, markers = [] }: OSMMapP
           .leaflet-control-attribution a {
             color: #F59E0B !important;
           }
+          .pulse-dot {
+            background-color: #F59E0B;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 3px solid #0F172A;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.9);
+          }
+          .car-badge {
+            background-color: #0F172A;
+            border: 2px solid #F59E0B;
+            border-radius: 16px;
+            padding: 3px 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #F8FAFC;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+          }
+          .dest-badge {
+            background-color: #EF4444;
+            border: 2px solid #FFFFFF;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.6);
+            font-size: 11px;
+          }
         </style>
       </head>
       <body>
@@ -57,19 +96,48 @@ export function OSMMap({ latitude, longitude, zoom = 15, markers = [] }: OSMMapP
             attribution: '© OpenStreetMap'
           }).addTo(map);
 
-          // Ícone estilizado do 88 Mobility
-          var customIcon = L.divIcon({
+          // Marcador do Passageiro (localização atual)
+          var passengerIcon = L.divIcon({
             className: 'custom-pin',
-            html: '<div style="background-color: #F59E0B; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #0F172A; box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);"></div>',
+            html: '<div class="pulse-dot"></div>',
             iconSize: [18, 18],
             iconAnchor: [9, 9]
           });
+          L.marker([${latitude}, ${longitude}], { icon: passengerIcon }).addTo(map).bindPopup('Você está aqui');
 
-          L.marker([${latitude}, ${longitude}], { icon: customIcon }).addTo(map);
+          var extraMarkers = ${serializedMarkers};
+          var allPoints = [[${latitude}, ${longitude}]];
 
-          ${markers.map(m => `
-            L.marker([${m.latitude}, ${m.longitude}]).addTo(map)${m.title ? `.bindPopup('${m.title}')` : ''};
-          `).join('\n')}
+          extraMarkers.forEach(function(m) {
+            var icon;
+            if (m.type === 'driver') {
+              icon = L.divIcon({
+                className: 'car-icon',
+                html: '<div class="car-badge">🚗 ' + (m.title || 'Motorista') + '</div>',
+                iconSize: [100, 26],
+                iconAnchor: [50, 13]
+              });
+            } else if (m.type === 'destination') {
+              icon = L.divIcon({
+                className: 'dest-icon',
+                html: '<div class="dest-badge">🏁</div>',
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+              });
+            }
+
+            var marker = icon ? L.marker([m.latitude, m.longitude], { icon: icon }) : L.marker([m.latitude, m.longitude]);
+            marker.addTo(map);
+            if (m.title) {
+              marker.bindPopup(m.title);
+            }
+            allPoints.push([m.latitude, m.longitude]);
+          });
+
+          // Ajusta zoom caso tenha destino para mostrar toda a rota
+          if (extraMarkers.some(function(m) { return m.type === 'destination'; })) {
+            map.fitBounds(L.latLngBounds(allPoints), { padding: [60, 60], maxZoom: 16 });
+          }
         </script>
       </body>
     </html>

@@ -8,6 +8,8 @@ build/
 .expo/
 *.apk
 *.aab
+*.zip
+apks/
 
 # Variáveis de ambiente com chaves locais
 .env
