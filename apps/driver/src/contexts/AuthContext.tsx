@@ -11,6 +11,13 @@ interface RegisterDriverData {
   password: string;
 }
 
+export interface DriverProfileUpdate {
+  name?: string;
+  vehicle?: string;
+  vehiclePlate?: string;
+  phone?: string;
+}
+
 interface AuthState {
   driver: Driver | null;
   isAuthenticated: boolean;
@@ -18,6 +25,7 @@ interface AuthState {
   login: (email: string, password: string) => void;
   registerDriver: (data: RegisterDriverData) => void;
   updateVehicle: (vehicle: string, vehiclePlate: string) => Promise<void>;
+  updateDriverProfile: (data: DriverProfileUpdate) => Promise<void>;
   logout: () => void;
 }
 
@@ -124,13 +132,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 400);
   };
 
-  // Permite atualizar os dados do veículo a qualquer momento pela tela de perfil
-  const updateVehicle = async (vehicle: string, vehiclePlate: string) => {
+  // Atualiza o perfil e veículo no estado e no storage
+  const updateDriverProfile = async (data: DriverProfileUpdate) => {
     if (!driver) return;
     const updated: Driver = {
       ...driver,
-      vehicle: vehicle.trim(),
-      vehiclePlate: vehiclePlate.trim().toUpperCase(),
+      name: data.name !== undefined ? data.name.trim() : driver.name,
+      vehicle: data.vehicle !== undefined ? data.vehicle.trim() : driver.vehicle,
+      vehiclePlate: data.vehiclePlate !== undefined ? data.vehiclePlate.trim().toUpperCase() : driver.vehiclePlate,
+      phone: data.phone !== undefined ? data.phone.trim() : driver.phone,
     };
     setDriver(updated);
     try {
@@ -140,8 +150,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       map[driver.email.trim().toLowerCase()] = updated;
       await AsyncStorage.setItem(DRIVERS_MAP_KEY, JSON.stringify(map));
     } catch (e) {
-      console.warn('Erro ao atualizar veículo:', e);
+      console.warn('Erro ao atualizar perfil do motorista:', e);
     }
+  };
+
+  // Permite atualizar os dados do veículo a qualquer momento pela tela de perfil
+  const updateVehicle = async (vehicle: string, vehiclePlate: string) => {
+    await updateDriverProfile({ vehicle, vehiclePlate });
   };
 
   const logout = async () => {
@@ -161,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       registerDriver,
       updateVehicle,
+      updateDriverProfile,
       logout,
     }}>
       {children}

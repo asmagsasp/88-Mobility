@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, Modal, TextInput, ActivityIndicator,
+  Alert, TextInput, ActivityIndicator,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius } from '../constants/theme';
@@ -14,14 +14,24 @@ const formatBRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 export function ProfileScreen() {
-  const { driver, logout, updateVehicle } = useAuth();
+  const { driver, logout, updateDriverProfile } = useAuth();
   const [completedRides, setCompletedRides] = useState<CompletedDriverRide[]>([]);
 
-  // Estados de edição do veículo
-  const [isEditingVehicle, setIsEditingVehicle] = useState(false);
-  const [editModel, setEditModel]               = useState('');
-  const [editPlate, setEditPlate]               = useState('');
-  const [isSaving, setIsSaving]                 = useState(false);
+  // Modos de edição inline (100% nativo e livre de bugs de Modal no Android)
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName]   = useState(driver?.name || '');
+  const [editModel, setEditModel] = useState(driver?.vehicle || '');
+  const [editPlate, setEditPlate] = useState(driver?.vehiclePlate || '');
+  const [isSaving, setIsSaving]   = useState(false);
+
+  // Sincroniza campos quando o motorista é carregado
+  useEffect(() => {
+    if (driver) {
+      setEditName(driver.name || '');
+      setEditModel(driver.vehicle || '');
+      setEditPlate(driver.vehiclePlate || '');
+    }
+  }, [driver]);
 
   useEffect(() => {
     (async () => {
@@ -42,47 +52,56 @@ export function ProfileScreen() {
   const currentVehicle = driver?.vehicle || 'Carro Cadastrado';
   const currentPlate   = driver?.vehiclePlate || 'Sem Placa';
 
-  const openVehicleModal = () => {
+  const handleStartEditing = () => {
+    setEditName(driver?.name || '');
     setEditModel(driver?.vehicle || '');
     setEditPlate(driver?.vehiclePlate || '');
-    setIsEditingVehicle(true);
+    setIsEditing(true);
+  };
+
+  const handleCancelEditing = () => {
+    setEditName(driver?.name || '');
+    setEditModel(driver?.vehicle || '');
+    setEditPlate(driver?.vehiclePlate || '');
+    setIsEditing(false);
   };
 
   const handleSaveVehicle = async () => {
-    if (!editModel.trim() || !editPlate.trim()) {
+    const trimmedModel = editModel.trim();
+    const trimmedPlate = editPlate.trim().toUpperCase();
+    const trimmedName  = editName.trim();
+
+    if (!trimmedModel || !trimmedPlate) {
       Alert.alert('Campos Obrigatórios', 'Preencha o modelo do carro e a placa.');
       return;
     }
+
     setIsSaving(true);
-    await updateVehicle(editModel.trim(), editPlate.trim().toUpperCase());
-    setIsSaving(false);
-    setIsEditingVehicle(false);
-    Alert.alert('Sucesso', 'Dados do veículo atualizados com sucesso!');
+    try {
+      await updateDriverProfile({
+        name: trimmedName || driver?.name || 'Motorista Parceiro',
+        vehicle: trimmedModel,
+        vehiclePlate: trimmedPlate,
+      });
+      setIsEditing(false);
+      Alert.alert('Sucesso! 🎉', 'Modelo do veículo e placa atualizados com sucesso.');
+    } catch (err) {
+      Alert.alert('Erro', 'Não foi possível salvar os dados. Tente novamente.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const menuItems = [
-    {
-      icon: '🚗',
-      label: 'Meu veículo',
-      sub: `${currentVehicle} · ${currentPlate} (toque para editar)`,
-      onPress: openVehicleModal,
-    },
-    { icon: '📋', label: 'Documentos', sub: 'CNH, CRLV validados', onPress: () => Alert.alert('Documentos', 'Seus documentos estão aprovados.') },
-    { icon: '💳', label: 'Dados bancários', sub: 'Chave PIX cadastrada para repasse', onPress: () => Alert.alert('Dados Bancários', 'Chave PIX ativa para repasse imediato.') },
-    { icon: '🔔', label: 'Notificações', sub: 'Avisos de novas corridas ativados', onPress: () => Alert.alert('Notificações', 'Notificações sonoras e visuais ativas.') },
-    { icon: '❓', label: 'Ajuda e suporte', sub: 'Central 88 Mobility 24h', onPress: () => Alert.alert('Suporte 88 Mobility', 'Atendimento de suporte ao motorista disponível 24h.') },
-  ];
-
   const handleLogout = () => {
-    Alert.alert('Sair do app?', 'Você será desconectado.', [
+    Alert.alert('Sair do app?', 'Você será desconectado da sua conta.', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sair', style: 'destructive', onPress: logout },
     ]);
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Avatar e Dados do Motorista */}
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      {/* Avatar e Dados Principais */}
       <View style={styles.avatarSection}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{driver?.name?.charAt(0) ?? 'A'}</Text>
@@ -95,6 +114,94 @@ export function ProfileScreen() {
           <Text style={styles.rides}>{totalRidesCount} {totalRidesCount === 1 ? 'corrida' : 'corridas'}</Text>
         </View>
         <Text style={styles.email}>{driver?.email || ''}</Text>
+      </View>
+
+      {/* Card de Gestão e Edição Direta do Veículo */}
+      <View style={styles.vehicleCard}>
+        <View style={styles.vehicleCardHeader}>
+          <Text style={styles.vehicleCardTitle}>🚗 Meu Veículo & Dados</Text>
+          {!isEditing && (
+            <TouchableOpacity style={styles.editPillBtn} onPress={handleStartEditing} activeOpacity={0.7}>
+              <Text style={styles.editPillBtnText}>✏️ Editar</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {isEditing ? (
+          <View style={styles.editForm}>
+            <Text style={styles.editHint}>
+              Estes dados são enviados ao passageiro quando você aceita uma corrida:
+            </Text>
+
+            <Text style={styles.inputLabel}>Modelo do Veículo</Text>
+            <TextInput
+              style={styles.input}
+              value={editModel}
+              onChangeText={setEditModel}
+              placeholder="Ex: Fiat Argo 2022, Honda Civic..."
+              placeholderTextColor={Colors.slate500}
+              autoCapitalize="words"
+            />
+
+            <Text style={styles.inputLabel}>Placa do Carro</Text>
+            <TextInput
+              style={styles.input}
+              value={editPlate}
+              onChangeText={setEditPlate}
+              placeholder="Ex: ABC1D23 ou BRA2E19"
+              placeholderTextColor={Colors.slate500}
+              autoCapitalize="characters"
+            />
+
+            <Text style={styles.inputLabel}>Nome do Motorista</Text>
+            <TextInput
+              style={styles.input}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Seu nome completo"
+              placeholderTextColor={Colors.slate500}
+              autoCapitalize="words"
+            />
+
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={handleCancelEditing}
+                disabled={isSaving}
+              >
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleSaveVehicle}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color={Colors.dark} />
+                ) : (
+                  <Text style={styles.saveBtnText}>Salvar Dados</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.vehicleInfoList}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Modelo:</Text>
+              <Text style={styles.infoValue}>{currentVehicle}</Text>
+            </View>
+            <View style={styles.infoDivider} />
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Placa:</Text>
+              <Text style={[styles.infoValue, { color: Colors.amber }]}>{currentPlate}</Text>
+            </View>
+            <View style={styles.infoDivider} />
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Motorista:</Text>
+              <Text style={styles.infoValue}>{driver?.name || 'Motorista'}</Text>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* Stats Reais */}
@@ -115,23 +222,43 @@ export function ProfileScreen() {
         </View>
       </View>
 
-      {/* Menu com clique para editar veículo */}
+      {/* Outras Opções de Menu */}
       <View style={styles.menu}>
-        {menuItems.map((item, i) => (
-          <TouchableOpacity
-            key={i}
-            style={styles.menuItem}
-            activeOpacity={0.7}
-            onPress={item.onPress}
-          >
-            <Text style={styles.menuIcon}>{item.icon}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuLabel}>{item.label}</Text>
-              <Text style={styles.menuSub}>{item.sub}</Text>
-            </View>
-            <Text style={styles.menuArrow}>›</Text>
-          </TouchableOpacity>
-        ))}
+        <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => Alert.alert('Documentos', 'Seus documentos (CNH e CRLV) foram verificados com sucesso.')}>
+          <Text style={styles.menuIcon}>📋</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuLabel}>Documentos</Text>
+            <Text style={styles.menuSub}>CNH e CRLV validados</Text>
+          </View>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => Alert.alert('Dados Bancários', 'Chave PIX ativa para repasse imediato de 88%.')}>
+          <Text style={styles.menuIcon}>💳</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuLabel}>Dados bancários</Text>
+            <Text style={styles.menuSub}>Chave PIX cadastrada para repasse</Text>
+          </View>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => Alert.alert('Notificações', 'Notificações sonoras e visuais de corridas ativas.')}>
+          <Text style={styles.menuIcon}>🔔</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuLabel}>Notificações</Text>
+            <Text style={styles.menuSub}>Avisos sonoros de novas corridas</Text>
+          </View>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.menuItem} activeOpacity={0.7} onPress={() => Alert.alert('Suporte 88 Mobility', 'Atendimento oficial ao motorista parceiro 24h.')}>
+          <Text style={styles.menuIcon}>❓</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuLabel}>Ajuda e suporte</Text>
+            <Text style={styles.menuSub}>Central 88 Mobility 24h</Text>
+          </View>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Sair */}
@@ -140,63 +267,6 @@ export function ProfileScreen() {
       </TouchableOpacity>
 
       <Text style={styles.version}>88 Mobility Motorista · Versão 1.0.0</Text>
-
-      {/* Modal para Editar Veículo e Placa */}
-      <Modal
-        visible={isEditingVehicle}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setIsEditingVehicle(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Editar Dados do Veículo</Text>
-            <Text style={styles.modalSubtitle}>
-              Estes dados aparecem para o passageiro ao solicitar a corrida.
-            </Text>
-
-            <Text style={styles.inputLabel}>Modelo do Veículo</Text>
-            <TextInput
-              style={styles.input}
-              value={editModel}
-              onChangeText={setEditModel}
-              placeholder="Ex: Fiat Argo 2022, Honda Civic..."
-              placeholderTextColor={Colors.slate500}
-            />
-
-            <Text style={styles.inputLabel}>Placa do Carro</Text>
-            <TextInput
-              style={styles.input}
-              value={editPlate}
-              onChangeText={setEditPlate}
-              placeholder="Ex: BRA2E19 ou ABC-1234"
-              placeholderTextColor={Colors.slate500}
-              autoCapitalize="characters"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.cancelModalBtn}
-                onPress={() => setIsEditingVehicle(false)}
-                disabled={isSaving}
-              >
-                <Text style={styles.cancelModalText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.saveModalBtn}
-                onPress={handleSaveVehicle}
-                disabled={isSaving}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color={Colors.dark} />
-                ) : (
-                  <Text style={styles.saveModalText}>Salvar Veículo</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -215,13 +285,84 @@ const styles = StyleSheet.create({
   },
   avatarText:    { fontSize: 32, fontWeight: '800', color: Colors.dark },
   name:          { fontSize: 20, fontWeight: '700', color: Colors.white, marginBottom: 2 },
-  vehicleHeader: { fontSize: 14, fontWeight: '600', color: Colors.amber, marginBottom: 6 },
+  vehicleHeader: { fontSize: 14, fontWeight: '700', color: Colors.amber, marginBottom: 6 },
   ratingRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   rating:        { fontSize: 13, color: Colors.amber, fontWeight: '600' },
   ratingDot:     { color: Colors.slate500 },
   rides:         { fontSize: 13, color: Colors.slate400 },
   email:         { fontSize: 13, color: Colors.slate500 },
 
+  // Card do Veículo
+  vehicleCard: {
+    backgroundColor: Colors.darkCard,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.darkBorder,
+    marginBottom: Spacing.lg,
+  },
+  vehicleCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  vehicleCardTitle: { fontSize: 15, fontWeight: '700', color: Colors.white },
+  editPillBtn: {
+    backgroundColor: Colors.amber,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+  },
+  editPillBtnText: { color: Colors.dark, fontWeight: '700', fontSize: 12 },
+
+  vehicleInfoList: { marginTop: 4 },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  infoLabel:   { fontSize: 13, color: Colors.slate400 },
+  infoValue:   { fontSize: 14, fontWeight: '600', color: Colors.white },
+  infoDivider: { height: 1, backgroundColor: Colors.darkBorder, marginVertical: 2 },
+
+  // Formulário de Edição
+  editForm: { marginTop: Spacing.sm },
+  editHint: { fontSize: 12, color: Colors.slate400, marginBottom: Spacing.md, lineHeight: 16 },
+  inputLabel: { fontSize: 12, fontWeight: '600', color: Colors.slate200, marginBottom: 4 },
+  input: {
+    backgroundColor: Colors.dark,
+    borderWidth: 1,
+    borderColor: Colors.darkBorder,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    color: Colors.white,
+    fontSize: 14,
+    marginBottom: Spacing.sm,
+  },
+  formActions: { flexDirection: 'row', gap: 10, marginTop: Spacing.sm },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.dark,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.darkBorder,
+  },
+  cancelBtnText: { color: Colors.slate400, fontWeight: '600', fontSize: 14 },
+  saveBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.amber,
+    alignItems: 'center',
+  },
+  saveBtnText: { color: Colors.dark, fontWeight: '800', fontSize: 14 },
+
+  // Stats
   statsRow: {
     flexDirection: 'row',
     backgroundColor: Colors.darkCard,
@@ -229,13 +370,14 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     borderWidth: 1,
     borderColor: Colors.darkBorder,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.lg,
   },
   statItem:    { flex: 1, alignItems: 'center' },
   statValue:   { fontSize: 18, fontWeight: '800', color: Colors.white },
   statLabel:   { fontSize: 11, color: Colors.slate400, marginTop: 2 },
   statDivider: { width: 1, backgroundColor: Colors.darkBorder },
 
+  // Menu
   menu: {
     backgroundColor: Colors.darkCard,
     borderRadius: Radius.lg,
@@ -268,52 +410,4 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: Colors.danger, fontWeight: '600', fontSize: 14 },
   version:    { textAlign: 'center', color: Colors.slate600, fontSize: 12 },
-
-  // Modal de edição
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    padding: Spacing.lg,
-  },
-  modalCard: {
-    backgroundColor: Colors.darkCard,
-    borderRadius: Radius.xl,
-    padding: Spacing.xl,
-    borderWidth: 1,
-    borderColor: Colors.darkBorder,
-  },
-  modalTitle:    { fontSize: 18, fontWeight: '800', color: Colors.white, marginBottom: 4 },
-  modalSubtitle: { fontSize: 12, color: Colors.slate400, marginBottom: Spacing.lg },
-  inputLabel:    { fontSize: 13, fontWeight: '600', color: Colors.slate200, marginBottom: 6 },
-  input: {
-    backgroundColor: Colors.dark,
-    borderWidth: 1,
-    borderColor: Colors.darkBorder,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 12,
-    color: Colors.white,
-    fontSize: 15,
-    marginBottom: Spacing.md,
-  },
-  modalActions:   { flexDirection: 'row', gap: 10, marginTop: Spacing.sm },
-  cancelModalBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.dark,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.darkBorder,
-  },
-  cancelModalText: { color: Colors.slate400, fontWeight: '600' },
-  saveModalBtn: {
-    flex: 1,
-    paddingVertical: 13,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.amber,
-    alignItems: 'center',
-  },
-  saveModalText: { color: Colors.dark, fontWeight: '800' },
 });
