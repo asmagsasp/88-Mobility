@@ -11,6 +11,11 @@ import { useTheme } from '../contexts/ThemeContext';
 import { OSMMap } from '../components/OSMMap';
 import type { Ride, Location as RideLocation } from '../types';
 import type { PassengerRideHistoryItem } from './HistoryScreen';
+import {
+  publishRideEvent,
+  pollRideEvents,
+  type SyncRidePayload,
+} from '../services/rideSync';
 
 type Step = 'idle' | 'selecting_destination' | 'confirming' | 'searching' | 'active';
 
@@ -50,8 +55,8 @@ function getHaversineDistanceKm(lat1: number, lon1: number, lat2: number, lon2: 
  * Tela Principal do Passageiro 88 Mobility:
  * - Mapa OpenStreetMap com localização ao vivo e motorista Abel visível
  * - Combo com autocompletar dinâmico de endereços via OpenStreetMap Nominatim
+ * - Sincronização em tempo real com o app do motorista: a chamada toca na tela do motorista para ele aceitar!
  * - Cálculo transparente de quilometragem e divisão 88/12 + taxa de manutenção
- * - Zero dados fictícios: histórico e destinos recentes 100% reais do usuário
  */
 export function HomeScreen() {
   const { passenger, logout } = useAuth();
@@ -66,6 +71,9 @@ export function HomeScreen() {
   const [recentDestinations, setRecentDestinations] = useState<AddressSuggestion[]>([]);
   const [destination, setDest]            = useState<AddressSuggestion | null>(null);
   const [activeRide, setActiveRide]       = useState<Partial<Ride> | null>(null);
+  const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+
+  const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
 
   // Motorista oficial Abel Magalhães posicionado nas proximidades do passageiro
   const driverPos = {
@@ -179,6 +187,81 @@ export function HomeScreen() {
   const totalAmount = kmAmount + SURGE_FEE + PLATFORM_FEE;
   const driverShare = totalAmount * 0.88;
 
+  // Escuta respostas do motorista em tempo real durante a busca ou corrida ativa
+  useEffect(() => {
+    if (step !== 'searching' && step !== 'active') return;
+    if (!currentRideId) return;
+
+    let isPolling = true;
+
+    const interval = setInterval(async () => {
+      if (!isPolling) return;
+      try {
+        const { events, latestTime } = await pollRideEvents(lastPollTime.current);
+        lastPollTime.current = latestTime;
+
+        for (const ev of events) {
+          if (ev.type === 'ACCEPT_RIDE' && ev.rideId === currentRideId) {
+            // Motorista aceitou a chamada!
+            setActiveRide({
+              id: currentRideId,
+              driverName: ev.driver.name,
+              driverVehicle: ev.driver.vehicle,
+              driverPlate: ev.driver.plate,
+              driverRating: ev.driver.rating,
+              driverPhone: ev.driver.phone,
+              estimatedMinutes: 3,
+              totalAmount,
+              driverShare,
+              platformShare: PLATFORM_FEE,
+              status: 'arriving',
+            });
+            setStep('active');
+          } else if (ev.type === 'DECLINE_RIDE' && ev.rideId === currentRideId) {
+            // Motorista recusou a chamada
+            setStep('confirming');
+            Alert.alert(
+              'Motorista Indisponível',
+              'O motorista Abel Magalhães não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
+            );
+          } else if (ev.type === 'COMPLETE_RIDE' && ev.rideId === currentRideId) {
+            // Motorista finalizou a corrida
+            if (destination) {
+              const historyItem: PassengerRideHistoryItem = {
+                id: currentRideId,
+                date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                timestamp: Date.now(),
+                origin: 'Sua localização',
+                destination: destination.label,
+                km: distanceKm,
+                total: totalAmount,
+                driverName: activeRide?.driverName || 'Abel Magalhães',
+                status: 'completed',
+              };
+              const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
+              const list: PassengerRideHistoryItem[] = stored ? JSON.parse(stored) : [];
+              list.unshift(historyItem);
+              await AsyncStorage.setItem(PASSENGER_HISTORY_KEY, JSON.stringify(list));
+            }
+            Alert.alert('Viagem Concluída! 🎉', `Corrida finalizada pelo motorista. Total: ${formatBRL(totalAmount)}`);
+            setActiveRide(null);
+            setStep('idle');
+            setDest(null);
+            setSearch('');
+            setCurrentRideId(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao escutar resposta do motorista:', err);
+      }
+    }, 1500);
+
+    return () => {
+      isPolling = false;
+      clearInterval(interval);
+    };
+  }, [step, currentRideId, destination, distanceKm, totalAmount, driverShare, activeRide]);
+
   const selectDestination = async (item: AddressSuggestion) => {
     setDest(item);
     setSearch(item.label);
@@ -195,29 +278,50 @@ export function HomeScreen() {
     }
   };
 
-  const requestRide = () => {
+  // Solicitar corrida: envia a chamada em tempo real para o app do motorista
+  const requestRide = async () => {
+    if (!destination) return;
+
+    const rideId = `ride-${Date.now()}`;
+    setCurrentRideId(rideId);
     setStep('searching');
-    // Conecta imediatamente com o motorista oficial Abel Magalhães
-    setTimeout(() => {
-      setActiveRide({
-        id: `ride-${Date.now()}`,
-        driverName: 'Abel Magalhães',
-        driverVehicle: 'Toyota Corolla 2023',
-        driverPlate: 'BRA-8888',
-        driverRating: 5.0,
-        estimatedMinutes: 3,
-        totalAmount,
-        driverShare,
-        platformShare: PLATFORM_FEE,
-        status: 'arriving',
-      });
-      setStep('active');
-    }, 2200);
+
+    const ridePayload: SyncRidePayload = {
+      id: rideId,
+      passengerName: passenger?.name || 'Passageiro',
+      origin: {
+        latitude: coords.lat,
+        longitude: coords.lng,
+        address: 'Sua localização atual',
+      },
+      destination: {
+        latitude: destination.lat,
+        longitude: destination.lng,
+        address: destination.label,
+      },
+      distanceKm,
+      totalAmount,
+      driverShare,
+      platformFee: PLATFORM_FEE,
+      status: 'requested',
+      requestedAt: new Date().toISOString(),
+      estimatedMinutes: Math.max(3, Math.round(distanceKm * 2)),
+    };
+
+    // Publica a chamada no canal em tempo real
+    await publishRideEvent({
+      type: 'REQUEST_RIDE',
+      ride: ridePayload,
+    });
   };
 
   // Concluir corrida e salvar no histórico real do passageiro
   const completeRide = async () => {
     if (!activeRide || !destination) return;
+
+    if (currentRideId) {
+      await publishRideEvent({ type: 'COMPLETE_RIDE', rideId: currentRideId });
+    }
 
     const historyItem: PassengerRideHistoryItem = {
       id: activeRide.id || `ride-${Date.now()}`,
@@ -227,7 +331,7 @@ export function HomeScreen() {
       destination: destination.label,
       km: distanceKm,
       total: totalAmount,
-      driverName: 'Abel Magalhães',
+      driverName: activeRide.driverName || 'Abel Magalhães',
       status: 'completed',
     };
 
@@ -240,7 +344,7 @@ export function HomeScreen() {
       console.warn('Erro ao registrar histórico de corrida:', e);
     }
 
-    Alert.alert('Viagem Concluída! 🎉', `Obrigado por viajar com Abel Magalhães na 88 Mobility. Valor: ${formatBRL(totalAmount)}`, [
+    Alert.alert('Viagem Concluída! 🎉', `Obrigado por viajar na 88 Mobility. Valor: ${formatBRL(totalAmount)}`, [
       {
         text: 'OK',
         onPress: () => {
@@ -248,18 +352,23 @@ export function HomeScreen() {
           setStep('idle');
           setDest(null);
           setSearch('');
+          setCurrentRideId(null);
         },
       },
     ]);
   };
 
   const cancelRide = () => {
-    Alert.alert('Cancelar corrida?', 'Tem certeza que deseja cancelar?', [
+    Alert.alert('Cancelar chamada?', 'Deseja cancelar o pedido de corrida?', [
       { text: 'Não', style: 'cancel' },
       {
         text: 'Sim, cancelar',
         style: 'destructive',
         onPress: async () => {
+          if (currentRideId) {
+            await publishRideEvent({ type: 'CANCEL_RIDE', rideId: currentRideId });
+          }
+
           if (activeRide && destination) {
             const cancelItem: PassengerRideHistoryItem = {
               id: activeRide.id || `ride-${Date.now()}`,
@@ -269,7 +378,7 @@ export function HomeScreen() {
               destination: destination.label,
               km: distanceKm,
               total: totalAmount,
-              driverName: 'Abel Magalhães',
+              driverName: activeRide.driverName || 'Abel Magalhães',
               status: 'cancelled',
             };
             try {
@@ -285,6 +394,7 @@ export function HomeScreen() {
           setStep('idle');
           setDest(null);
           setSearch('');
+          setCurrentRideId(null);
         },
       },
     ]);
@@ -417,15 +527,18 @@ export function HomeScreen() {
         </View>
       )}
 
-      {/* Buscando motorista */}
+      {/* Buscando motorista em tempo real */}
       {step === 'searching' && (
         <View style={[styles.searchingSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
           <ActivityIndicator size="large" color={Colors.amber} style={{ marginBottom: 16 }} />
-          <Text style={[styles.searchingTitle, { color: colors.text }]}>Conectando com o motorista...</Text>
+          <Text style={[styles.searchingTitle, { color: colors.text }]}>Chamando motorista Abel Magalhães...</Text>
           <Text style={[styles.searchingSubtitle, { color: colors.textSecondary }]}>
-            Localizando Abel Magalhães (Toyota Corolla BRA-8888) mais próximo de você
+            Aguardando Abel aceitar a chamada no aplicativo do motorista.
           </Text>
+          <TouchableOpacity style={[styles.cancelBtn, { width: '80%', marginTop: 16 }]} onPress={cancelRide}>
+            <Text style={styles.cancelBtnText}>Cancelar Chamada</Text>
+          </TouchableOpacity>
         </View>
       )}
 

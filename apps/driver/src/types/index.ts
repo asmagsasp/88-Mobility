@@ -43,6 +43,7 @@ export interface Ride {
   driverVehicle?: string;
   driverPlate?: string;
   driverRating?: number;
+  driverPhone?: string;
   origin: Location;
   destination: Location;
   distanceKm: number;

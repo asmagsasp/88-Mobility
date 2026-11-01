@@ -10,6 +10,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { OSMMap } from '../components/OSMMap';
 import type { Ride } from '../types';
 import type { CompletedDriverRide } from './EarningsScreen';
+import {
+  publishRideEvent,
+  pollRideEvents,
+  type SyncRidePayload,
+} from '../services/rideSync';
 
 const { height } = Dimensions.get('window');
 const COMPLETED_RIDES_KEY = '@88mobility_driver_completed_rides';
@@ -21,7 +26,7 @@ const formatBRL = (v: number) =>
  * Tela principal do motorista:
  * - Mapa centrado na localização real GPS
  * - Toggle Online/Offline
- * - Zero dados fictícios: ganhos e corridas calculados estritamente com base no histórico real
+ * - Sincronização em tempo real com o aplicativo do passageiro: recebe chamadas ao vivo!
  * - Ao recusar uma corrida, ela NUNCA mais é reoferecida
  */
 export function HomeScreen() {
@@ -29,9 +34,12 @@ export function HomeScreen() {
   const [coords, setCoords]           = useState<{ lat: number; lng: number }>({ lat: -15.7942, lng: -47.8822 });
   const [gpsReady, setGpsReady]       = useState(false);
   const [isOnline, setIsOnline]       = useState(false);
-  const [rideRequest, setRideRequest] = useState<Ride | null>(null);
-  const [activeRide, setActiveRide]   = useState<Ride | null>(null);
+  const [rideRequest, setRideRequest] = useState<SyncRidePayload | null>(null);
+  const [activeRide, setActiveRide]   = useState<SyncRidePayload | null>(null);
   const [completedToday, setCompletedToday] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
+
+  // Timestamp em segundos da última checagem de mensagens no canal
+  const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 60);
 
   // Conjunto de IDs de corridas que o motorista já recusou para JAMAIS reoferecê-las
   const rejectedRideIds = useRef<Set<string>>(new Set());
@@ -83,10 +91,56 @@ export function HomeScreen() {
     return () => { isMounted = false; };
   }, []);
 
-  // Recusar corrida: fecha popup e marca ID como permanentemente recusada
+  // Polling em tempo real para receber chamadas de passageiros quando estiver Online
+  useEffect(() => {
+    if (!isOnline) return;
+
+    let isPolling = true;
+
+    const interval = setInterval(async () => {
+      if (!isOnline || !isPolling) return;
+      try {
+        const { events, latestTime } = await pollRideEvents(lastPollTime.current);
+        lastPollTime.current = latestTime;
+
+        for (const ev of events) {
+          if (ev.type === 'REQUEST_RIDE') {
+            const requested = ev.ride;
+            // Se já foi recusada, ou se já está atendendo outra, ignora
+            if (rejectedRideIds.current.has(requested.id)) continue;
+            if (activeRide && activeRide.id === requested.id) continue;
+            if (rideRequest && rideRequest.id === requested.id) continue;
+
+            // Nova chamada recebida do passageiro!
+            setRideRequest(requested);
+            Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65 }).start();
+          } else if (ev.type === 'CANCEL_RIDE') {
+            if (rideRequest && rideRequest.id === ev.rideId) {
+              dismissRequest();
+              Alert.alert('Chamada Cancelada', 'O passageiro cancelou o pedido de corrida.');
+            } else if (activeRide && activeRide.id === ev.rideId) {
+              setActiveRide(null);
+              Alert.alert('Corrida Cancelada', 'O passageiro cancelou a corrida em andamento.');
+            }
+          }
+        }
+      } catch (pollErr) {
+        console.warn('Erro no polling do motorista:', pollErr);
+      }
+    }, 1800);
+
+    return () => {
+      isPolling = false;
+      clearInterval(interval);
+    };
+  }, [isOnline, rideRequest, activeRide]);
+
+  // Recusar corrida: fecha popup, avisa passageiro e marca ID como permanentemente recusada
   const dismissRequest = (rideId?: string) => {
-    if (rideId) {
-      rejectedRideIds.current.add(rideId);
+    const targetId = rideId || rideRequest?.id;
+    if (targetId) {
+      rejectedRideIds.current.add(targetId);
+      publishRideEvent({ type: 'DECLINE_RIDE', rideId: targetId });
     }
     Animated.timing(slideAnim, { toValue: 300, duration: 250, useNativeDriver: true }).start(() => {
       setRideRequest(null);
@@ -94,28 +148,48 @@ export function HomeScreen() {
     });
   };
 
-  // Aceitar corrida
-  const acceptRide = () => {
+  // Aceitar corrida e avisar o aplicativo do passageiro em tempo real
+  const acceptRide = async () => {
     if (!rideRequest) return;
-    setActiveRide({ ...rideRequest, status: 'arriving' });
+    const current = rideRequest;
+
+    await publishRideEvent({
+      type: 'ACCEPT_RIDE',
+      rideId: current.id,
+      driver: {
+        name: driver?.name || 'Abel Magalhães',
+        vehicle: driver?.vehicle || 'Toyota Corolla 2023',
+        plate: driver?.vehiclePlate || 'BRA-8888',
+        phone: driver?.phone || '(11) 98888-8888',
+        rating: driver?.rating || 5.0,
+      },
+    });
+
+    setActiveRide(current);
     Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start(() => {
       setRideRequest(null);
       slideAnim.setValue(300);
     });
   };
 
-  // Concluir corrida e persistir ganho real no histórico
+  // Concluir corrida, notificar passageiro e persistir ganho real no histórico
   const completeRide = async () => {
     if (!activeRide) return;
-    const earning = activeRide.driverShare;
+    const current = activeRide;
+    const earning = current.driverShare;
+
+    await publishRideEvent({
+      type: 'COMPLETE_RIDE',
+      rideId: current.id,
+    });
 
     const newCompleted: CompletedDriverRide = {
-      id: activeRide.id || `ride-${Date.now()}`,
+      id: current.id || `ride-${Date.now()}`,
       date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       timestamp: Date.now(),
-      origin: activeRide.origin.address || 'Embarque do passageiro',
-      destination: activeRide.destination.address || 'Destino final',
-      km: activeRide.distanceKm,
+      origin: current.origin.address || 'Embarque do passageiro',
+      destination: current.destination.address || 'Destino final',
+      km: current.distanceKm,
       earning,
     };
 
@@ -193,7 +267,7 @@ export function HomeScreen() {
               {isOnline ? '🟢 Online — aguardando chamadas' : '⚫ Offline — desconectado'}
             </Text>
             {isOnline && !activeRide && (
-              <Text style={styles.onlineSub}>Você receberá chamadas de passageiros próximos</Text>
+              <Text style={styles.onlineSub}>Conectado em tempo real com passageiros da 88 Mobility</Text>
             )}
           </View>
           <Switch
@@ -246,7 +320,7 @@ export function HomeScreen() {
         )}
       </View>
 
-      {/* Popup de nova corrida recebida */}
+      {/* Popup de nova corrida recebida em tempo real do passageiro */}
       {rideRequest && (
         <Animated.View
           style={[styles.rideRequestSheet, { transform: [{ translateY: slideAnim }] }]}
