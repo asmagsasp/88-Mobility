@@ -10,12 +10,12 @@ import { redis } from './config/redis';
 // ============================================================
 
 async function bootstrap() {
-  // Testa conexão com o banco de dados
+  // Testa conexão com o banco de dados SQLite
   try {
     await prisma.$connect();
-    console.log('✅ PostgreSQL conectado');
+    console.log('✅ SQLite conectado (dev.db)');
   } catch (err) {
-    console.error('❌ Falha ao conectar ao PostgreSQL:', err);
+    console.error('❌ Falha ao conectar ao banco SQLite:', err);
     process.exit(1);
   }
 

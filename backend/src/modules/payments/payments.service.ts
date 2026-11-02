@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 import { MercadoPagoConfig, Payment as MercadoPagoPayment } from 'mercadopago';
-import { PaymentMethod, PaymentStatus } from '@prisma/client';
+import { PaymentMethod, PaymentStatus } from '../../shared/types/enums';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../shared/middleware/error.middleware';
@@ -109,7 +109,7 @@ export async function processPayment(rideId: string, userId: string) {
       method: ride.paymentMethod,
       status: PaymentStatus.PENDING,
       gatewayId,
-      gatewayResponse: gatewayResponse as object,
+      gatewayResponse: JSON.stringify(gatewayResponse),
     },
   });
 

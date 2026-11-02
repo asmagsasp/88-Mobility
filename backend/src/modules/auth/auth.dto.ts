@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod } from '../../shared/types/enums';
 
 // ============================================================
 // DTOs (Data Transfer Objects) do módulo de Auth

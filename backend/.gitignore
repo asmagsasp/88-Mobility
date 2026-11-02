@@ -27,3 +27,7 @@ Thumbs.db
 
 # Prisma
 prisma/migrations/
+*.db
+*.db-journal
+*.sqlite
+dev.db

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod } from '../../shared/types/enums';
 
 // ============================================================
 // DTOs do módulo de Corridas

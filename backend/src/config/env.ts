@@ -3,44 +3,46 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Schema de validação de todas as variáveis de ambiente obrigatórias
+// Schema de validação das variáveis de ambiente com defaults seguros para desenvolvimento local (SQLite)
 const envSchema = z.object({
   // Servidor
   PORT: z.string().default('3000').transform(Number),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  // Banco de dados
-  DATABASE_URL: z.string({ required_error: 'DATABASE_URL é obrigatória' }).url(),
+  // Banco de dados: SQLite local por padrão (dev.db)
+  DATABASE_URL: z.string().default('file:./dev.db'),
 
-  // Redis
-  REDIS_URL: z.string({ required_error: 'REDIS_URL é obrigatória' }),
+  // Redis (opcional — usa fallback em memória quando ausente)
+  REDIS_URL: z.string().optional().default(''),
 
   // JWT
-  JWT_SECRET: z.string({ required_error: 'JWT_SECRET é obrigatória' }).min(32, 'JWT_SECRET deve ter ao menos 32 caracteres'),
-  JWT_REFRESH_SECRET: z.string({ required_error: 'JWT_REFRESH_SECRET é obrigatória' }).min(32),
+  JWT_SECRET: z
+    .string()
+    .default('88mobility_super_secret_jwt_key_2026_dev_min32chars!'),
+  JWT_REFRESH_SECRET: z
+    .string()
+    .default('88mobility_super_refresh_jwt_key_2026_dev_min32!'),
 
-  // Google Maps
-  GOOGLE_MAPS_API_KEY: z.string({ required_error: 'GOOGLE_MAPS_API_KEY é obrigatória' }),
+  // Google Maps (opcional — fallback para Haversine e OSRM)
+  GOOGLE_MAPS_API_KEY: z.string().optional().default(''),
 
-  // Stripe
-  STRIPE_SECRET_KEY: z.string({ required_error: 'STRIPE_SECRET_KEY é obrigatória' }),
-  STRIPE_WEBHOOK_SECRET: z.string({ required_error: 'STRIPE_WEBHOOK_SECRET é obrigatória' }),
+  // Stripe (opcional em dev)
+  STRIPE_SECRET_KEY: z.string().optional().default(''),
+  STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
 
-  // Mercado Pago
-  MERCADO_PAGO_ACCESS_TOKEN: z.string({ required_error: 'MERCADO_PAGO_ACCESS_TOKEN é obrigatória' }),
+  // Mercado Pago (opcional em dev)
+  MERCADO_PAGO_ACCESS_TOKEN: z.string().optional().default(''),
 
   // Admin padrão
   ADMIN_EMAIL: z.string().email().default('admin@88mobility.com'),
   ADMIN_PASSWORD_HASH: z.string().optional(),
 
   // CORS
-  ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+  ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:19006,*'),
 });
 
-// Tipo inferido do schema
 export type Env = z.infer<typeof envSchema>;
 
-// Valida e exporta as variáveis
 const parseResult = envSchema.safeParse(process.env);
 
 if (!parseResult.success) {
@@ -51,5 +53,4 @@ if (!parseResult.success) {
 
 export const env = parseResult.data;
 
-// Origens permitidas para o CORS (array)
 export const allowedOrigins = env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());

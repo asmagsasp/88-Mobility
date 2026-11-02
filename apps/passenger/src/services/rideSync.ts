@@ -1,6 +1,7 @@
-// Serviço de sincronização em tempo real entre Passageiro e Motorista via ponte de rede (ntfy.sh)
-// Funciona 100% sem necessidade de servidor local, chaves de API pagas ou configurações complexas.
+// Serviço de sincronização em tempo real entre Passageiro e Motorista
+// Integração dupla: Banco SQLite no Backend + Ponte de eventos em tempo real (ntfy.sh)
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 const SYNC_URL = 'https://ntfy.sh/88mobility_live_rides_sync';
 
 export interface SyncRidePayload {
@@ -36,9 +37,20 @@ export type RideSyncEvent =
   | { type: 'CANCEL_RIDE'; rideId: string };
 
 /**
- * Publica um evento no canal em tempo real
+ * Publica um evento no canal em tempo real e persiste no SQLite do Backend
  */
 export async function publishRideEvent(event: RideSyncEvent): Promise<boolean> {
+  // 1. Salva evento no banco de dados SQLite do Backend se disponível
+  try {
+    const rideId = 'ride' in event ? event.ride.id : ('rideId' in event ? event.rideId : 'global');
+    fetch(`${BACKEND_URL}/rides/sync/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rideId, type: event.type, payload: event }),
+    }).catch(() => {});
+  } catch {}
+
+  // 2. Transmite via ponte em tempo real
   try {
     const res = await fetch(SYNC_URL, {
       method: 'POST',

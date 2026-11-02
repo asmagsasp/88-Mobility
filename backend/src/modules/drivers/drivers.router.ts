@@ -34,4 +34,10 @@ router.patch(
 /** Ganhos do motorista por período */
 router.get('/earnings', driversController.getEarnings);
 
+/** Salva documentos (CNH e CRLV) */
+router.post('/documents', driversController.updateDocuments);
+
+/** Salva chave PIX para repasse */
+router.post('/pix', driversController.updatePix);
+
 export default router;

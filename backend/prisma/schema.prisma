@@ -1,63 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Prisma Schema para 88 Mobility — SQLite (Banco de dados local em arquivo)
+// Zero-config: Não necessita de servidor PostgreSQL externo ou Docker
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-}
-
-// ============================================================
-// Enum: papéis do usuário no sistema
-// ============================================================
-enum UserRole {
-  PASSENGER
-  DRIVER
-  ADMIN
-}
-
-// ============================================================
-// Enum: status possíveis de uma corrida
-// ============================================================
-enum RideStatus {
-  REQUESTED       // Passageiro solicitou
-  ACCEPTED        // Motorista aceitou
-  DRIVER_ARRIVING // Motorista a caminho
-  IN_PROGRESS     // Corrida em andamento
-  COMPLETED       // Corrida finalizada
-  CANCELLED       // Corrida cancelada
-}
-
-// ============================================================
-// Enum: métodos de pagamento aceitos
-// ============================================================
-enum PaymentMethod {
-  CREDIT_CARD
-  DEBIT_CARD
-  PIX
-  CASH
-  NEXT_RIDE // Cobrança na próxima corrida (débito automático)
-}
-
-// ============================================================
-// Enum: status do pagamento
-// ============================================================
-enum PaymentStatus {
-  PENDING
-  PAID
-  FAILED
-  REFUNDED
-}
-
-// ============================================================
-// Enum: plataformas de dispositivo para push notifications
-// ============================================================
-enum DevicePlatform {
-  IOS
-  ANDROID
 }
 
 // ============================================================
@@ -69,7 +19,7 @@ model User {
   phone        String   @unique
   name         String
   passwordHash String
-  role         UserRole @default(PASSENGER)
+  role         String   @default("PASSENGER") // PASSENGER, DRIVER, ADMIN
   isActive     Boolean  @default(true)
   isVerified   Boolean  @default(false)
   avatar       String?
@@ -78,14 +28,14 @@ model User {
   updatedAt    DateTime @updatedAt
 
   // Relações
-  driverProfile   DriverProfile?
-  ridesAsPassenger Ride[]         @relation("PassengerRides")
-  ridesAsDriver   Ride[]         @relation("DriverRides")
-  payments        Payment[]
-  ratingsGiven    Rating[]       @relation("RatingsGiven")
-  ratingsReceived Rating[]       @relation("RatingsReceived")
-  deviceTokens    DeviceToken[]
-  pricingUpdates  PricingConfig[] @relation("PricingUpdatedBy")
+  driverProfile    DriverProfile?
+  ridesAsPassenger Ride[]          @relation("PassengerRides")
+  ridesAsDriver    Ride[]          @relation("DriverRides")
+  payments         Payment[]
+  ratingsGiven     Rating[]        @relation("RatingsGiven")
+  ratingsReceived  Rating[]        @relation("RatingsReceived")
+  deviceTokens     DeviceToken[]
+  pricingUpdates   PricingConfig[] @relation("PricingUpdatedBy")
 
   @@map("users")
 }
@@ -94,23 +44,35 @@ model User {
 // Model: Perfil do Motorista
 // ============================================================
 model DriverProfile {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  licenseNumber     String   @unique
-  licenseExpiry     DateTime
-  vehiclePlate      String   @unique
-  vehicleModel      String
-  vehicleYear       Int
-  vehicleColor      String
-  isApproved        Boolean  @default(false)
-  documentsVerified Boolean  @default(false)
-  isOnline          Boolean  @default(false)
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  licenseNumber     String?   @unique
+  licenseExpiry     DateTime?
+  vehiclePlate      String?   @unique
+  vehicleModel      String?   @default("Honda Fit")
+  vehicleYear       Int?      @default(2020)
+  vehicleColor      String?   @default("Prata")
+  vehicleRenavam    String?
+
+  // Documentos CNH e CRLV (fotos/URLs)
+  cnhPhotoUrl       String?
+  crlvPhotoUrl      String?
+
+  // Dados Bancários (Repasse 88% via PIX)
+  pixKeyType        String?   // CPF, EMAIL, PHONE, RANDOM
+  pixKey            String?
+  pixBankName       String?
+  pixAccountHolder  String?
+
+  isApproved        Boolean   @default(true)
+  documentsVerified Boolean   @default(false)
+  isOnline          Boolean   @default(false)
   currentLat        Float?
   currentLng        Float?
-  totalKm           Float    @default(0)
-  totalEarnings     Float    @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  totalKm           Float     @default(0)
+  totalEarnings     Float     @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Relação
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -122,10 +84,10 @@ model DriverProfile {
 // Model: Corrida
 // ============================================================
 model Ride {
-  id                 String        @id @default(uuid())
+  id                 String    @id @default(uuid())
   passengerId        String
   driverId           String?
-  status             RideStatus    @default(REQUESTED)
+  status             String    @default("REQUESTED") // REQUESTED, ACCEPTED, DRIVER_ARRIVING, IN_PROGRESS, COMPLETED, CANCELLED
 
   // Origem
   originLat          Float
@@ -141,27 +103,26 @@ model Ride {
   estimatedKm        Float
   actualKm           Float?
 
-  // IMPORTANTE: snapshot dos valores no momento da solicitação
-  // Garante que variações futuras não afetem corridas em andamento
+  // Snapshot dos valores no momento da solicitação
   pricePerKm         Float
-  platformFee        Float    @default(2.00) // Taxa fixa de manutenção (snapshot)
+  platformFee        Float     @default(2.00) // Taxa fixa R$ 2,00
 
   // Valores financeiros calculados
   totalAmount        Float?
-  driverAmount       Float?        // 88% do valor por Km
-  platformAmount     Float?        // 12% do valor por Km + taxa fixa
+  driverAmount       Float?    // 88% do valor por Km
+  platformAmount     Float?    // 12% do valor por Km + taxa fixa
 
   // Pagamento
-  paymentMethod      PaymentMethod @default(CASH)
-  paymentStatus      PaymentStatus @default(PENDING)
+  paymentMethod      String    @default("CASH") // CREDIT_CARD, DEBIT_CARD, PIX, CASH, NEXT_RIDE
+  paymentStatus      String    @default("PENDING") // PENDING, PAID, FAILED, REFUNDED
 
   // Timestamps do ciclo de vida
   startedAt          DateTime?
   completedAt        DateTime?
   cancelledAt        DateTime?
   cancelReason       String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Relações
   passenger User     @relation("PassengerRides", fields: [passengerId], references: [id])
@@ -176,15 +137,15 @@ model Ride {
 // Model: Configuração de Preço (gerenciado pelo admin)
 // ============================================================
 model PricingConfig {
-  id              String   @id @default(uuid())
-  pricePerKm      Float    // Preço por quilômetro em BRL
-  platformFee     Float    @default(2.00) // Taxa fixa de manutenção da plataforma (R$)
-  driverSplit     Float    @default(0.88) // 88% do valor do Km para o motorista
-  platformSplit   Float    @default(0.12) // 12% do valor do Km para a plataforma
-  isActive        Boolean  @default(true)
-  updatedBy       String   // ID do admin que atualizou
-  updatedAt       DateTime @default(now()) @updatedAt
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  pricePerKm    Float    // Preço por Km (ex: R$ 2.50)
+  platformFee   Float    @default(2.00) // Taxa fixa de manutenção (R$ 2.00)
+  driverSplit   Float    @default(0.88) // 88% do valor do Km para o motorista
+  platformSplit Float    @default(0.12) // 12% do valor do Km para a plataforma
+  isActive      Boolean  @default(true)
+  updatedBy     String   // ID do admin
+  updatedAt     DateTime @default(now()) @updatedAt
+  createdAt     DateTime @default(now())
 
   // Relação
   admin User @relation("PricingUpdatedBy", fields: [updatedBy], references: [id])
@@ -196,16 +157,16 @@ model PricingConfig {
 // Model: Pagamento
 // ============================================================
 model Payment {
-  id              String        @id @default(uuid())
-  rideId          String        @unique
+  id              String   @id @default(uuid())
+  rideId          String   @unique
   userId          String
   amount          Float
-  method          PaymentMethod
-  status          PaymentStatus @default(PENDING)
-  gatewayId       String?       // ID da transação no gateway (Stripe/MercadoPago)
-  gatewayResponse Json?         // Resposta completa do gateway
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  method          String   @default("CASH")
+  status          String   @default("PENDING")
+  gatewayId       String?
+  gatewayResponse String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relações
   ride Ride @relation(fields: [rideId], references: [id])
@@ -215,7 +176,7 @@ model Payment {
 }
 
 // ============================================================
-// Model: Avaliação (motorista avalia passageiro e vice-versa)
+// Model: Avaliação
 // ============================================================
 model Rating {
   id         String   @id @default(uuid())
@@ -231,7 +192,6 @@ model Rating {
   fromUser User @relation("RatingsGiven", fields: [fromUserId], references: [id])
   toUser   User @relation("RatingsReceived", fields: [toUserId], references: [id])
 
-  // Um usuário só pode avaliar outro uma vez por corrida
   @@unique([rideId, fromUserId])
   @@map("ratings")
 }
@@ -240,15 +200,28 @@ model Rating {
 // Model: Token de dispositivo para push notifications
 // ============================================================
 model DeviceToken {
-  id        String         @id @default(uuid())
+  id        String   @id @default(uuid())
   userId    String
-  token     String         @unique
-  platform  DevicePlatform
-  updatedAt DateTime       @updatedAt
-  createdAt DateTime       @default(now())
+  token     String   @unique
+  platform  String   @default("ANDROID") // IOS, ANDROID
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 
-  // Relação
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("device_tokens")
+}
+
+// ============================================================
+// Model: Eventos de sincronização em tempo real (Rides Live Events)
+// ============================================================
+model RideSyncEvent {
+  id        String   @id @default(uuid())
+  rideId    String
+  type      String   // REQUEST_RIDE, ACCEPT_RIDE, DRIVER_LOCATION, etc.
+  payload   String   // JSON string com dados do evento
+  createdAt DateTime @default(now())
+
+  @@index([rideId])
+  @@map("ride_sync_events")
 }

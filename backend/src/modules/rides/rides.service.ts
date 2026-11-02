@@ -1,5 +1,5 @@
 import { Client as GoogleMapsClient, UnitSystem } from '@googlemaps/google-maps-services-js';
-import { RideStatus } from '@prisma/client';
+import { RideStatus } from '../../shared/types/enums';
 import { prisma } from '../../config/database';
 import { redis, REDIS_KEYS } from '../../config/redis';
 import { env } from '../../config/env';
@@ -356,7 +356,7 @@ export async function cancelRide(userId: string, rideId: string, reason?: string
     RideStatus.DRIVER_ARRIVING,
   ];
 
-  if (!cancellableStatuses.includes(ride.status)) {
+  if (!cancellableStatuses.includes(ride.status as RideStatus)) {
     throw new AppError('Corrida não pode ser cancelada neste estado', 409);
   }
 
@@ -376,6 +376,52 @@ export async function cancelRide(userId: string, rideId: string, reason?: string
   await Promise.all(cleanupKeys.map((k) => redis.del(k)));
 
   return updatedRide;
+}
+
+/**
+ * Publica um evento de sincronização no banco SQLite
+ */
+export async function publishSyncEvent(rideId: string, type: string, payload: any) {
+  const event = await prisma.rideSyncEvent.create({
+    data: {
+      rideId,
+      type,
+      payload: typeof payload === 'string' ? payload : JSON.stringify(payload),
+    },
+  });
+  return event;
+}
+
+/**
+ * Consulta eventos de sincronização recentes do banco SQLite
+ */
+export async function getSyncEvents(since?: Date) {
+  const where = since ? { createdAt: { gt: since } } : {};
+  const events = await prisma.rideSyncEvent.findMany({
+    where,
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  });
+
+  return events.map((e) => {
+    try {
+      return {
+        id: e.id,
+        rideId: e.rideId,
+        type: e.type,
+        payload: JSON.parse(e.payload),
+        createdAt: e.createdAt,
+      };
+    } catch {
+      return {
+        id: e.id,
+        rideId: e.rideId,
+        type: e.type,
+        payload: e.payload,
+        createdAt: e.createdAt,
+      };
+    }
+  });
 }
 
 /**

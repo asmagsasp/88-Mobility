@@ -43,3 +43,23 @@ export async function getEarnings(req: Request, res: Response, next: NextFunctio
     next(err);
   }
 }
+
+/** POST /drivers/documents */
+export async function updateDocuments(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await driversService.updateDocuments(req.user!.userId, req.body);
+    sendSuccess(res, result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** POST /drivers/pix */
+export async function updatePix(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await driversService.updatePix(req.user!.userId, req.body);
+    sendSuccess(res, result);
+  } catch (err) {
+    next(err);
+  }
+}

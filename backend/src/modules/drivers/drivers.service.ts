@@ -152,3 +152,69 @@ export async function getEarnings(
     rides,
   };
 }
+
+/**
+ * Salva ou atualiza documentos do motorista (CNH, CRLV, Renavam)
+ */
+export async function updateDocuments(
+  driverId: string,
+  data: {
+    licenseNumber?: string;
+    vehicleRenavam?: string;
+    cnhPhotoUrl?: string;
+    crlvPhotoUrl?: string;
+  }
+) {
+  const profile = await prisma.driverProfile.upsert({
+    where: { userId: driverId },
+    update: {
+      licenseNumber: data.licenseNumber,
+      vehicleRenavam: data.vehicleRenavam,
+      cnhPhotoUrl: data.cnhPhotoUrl,
+      crlvPhotoUrl: data.crlvPhotoUrl,
+      documentsVerified: false,
+    },
+    create: {
+      userId: driverId,
+      licenseNumber: data.licenseNumber,
+      vehicleRenavam: data.vehicleRenavam,
+      cnhPhotoUrl: data.cnhPhotoUrl,
+      crlvPhotoUrl: data.crlvPhotoUrl,
+      documentsVerified: false,
+    },
+  });
+
+  return profile;
+}
+
+/**
+ * Salva ou atualiza os dados bancários (Chave PIX para repasse)
+ */
+export async function updatePix(
+  driverId: string,
+  data: {
+    pixKeyType: string;
+    pixKey: string;
+    pixBankName?: string;
+    pixAccountHolder?: string;
+  }
+) {
+  const profile = await prisma.driverProfile.upsert({
+    where: { userId: driverId },
+    update: {
+      pixKeyType: data.pixKeyType,
+      pixKey: data.pixKey,
+      pixBankName: data.pixBankName,
+      pixAccountHolder: data.pixAccountHolder,
+    },
+    create: {
+      userId: driverId,
+      pixKeyType: data.pixKeyType,
+      pixKey: data.pixKey,
+      pixBankName: data.pixBankName,
+      pixAccountHolder: data.pixAccountHolder,
+    },
+  });
+
+  return profile;
+}

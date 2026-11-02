@@ -1,4 +1,5 @@
-import { UserRole } from '@prisma/client';
+import { UserRole } from './enums';
+export * from './enums';
 
 // ============================================================
 // Tipos compartilhados do sistema 88 Mobility

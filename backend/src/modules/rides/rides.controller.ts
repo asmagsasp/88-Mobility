@@ -108,3 +108,26 @@ export async function cancelRide(req: Request, res: Response, next: NextFunction
     next(err);
   }
 }
+
+/** POST /rides/sync/events — Publica evento de corrida no banco SQLite */
+export async function publishSyncEvent(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { rideId, type, payload } = req.body;
+    const event = await ridesService.publishSyncEvent(rideId || 'global', type, payload || req.body);
+    sendSuccess(res, event, 201);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /rides/sync/events — Consulta eventos recentes de corridas no banco SQLite */
+export async function getSyncEvents(req: Request, res: Response, next: NextFunction) {
+  try {
+    const sinceParam = req.query.since as string;
+    const since = sinceParam ? new Date(isNaN(Number(sinceParam)) ? sinceParam : Number(sinceParam) * 1000) : undefined;
+    const events = await ridesService.getSyncEvents(since);
+    sendSuccess(res, events);
+  } catch (err) {
+    next(err);
+  }
+}

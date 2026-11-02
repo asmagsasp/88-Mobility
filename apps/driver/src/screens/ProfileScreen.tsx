@@ -209,6 +209,22 @@ export function ProfileScreen() {
         updatedAt: new Date().toISOString(),
       };
       await AsyncStorage.setItem(DOCS_STORAGE_KEY, JSON.stringify(payload));
+
+      // Tenta sincronizar com o banco de dados SQLite do Backend
+      try {
+        const backendUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+        fetch(`${backendUrl}/drivers/documents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            licenseNumber: cnhNumber.trim(),
+            vehicleRenavam: crlvRenavam.trim(),
+            cnhPhotoUrl: cnhUri,
+            crlvPhotoUrl: crlvUri,
+          }),
+        }).catch(() => {});
+      } catch {}
+
       setIsSavingDocs(false);
       setShowDocsModal(false);
       Alert.alert('Documentos Enviados! 📋✅', 'Sua CNH e CRLV foram salvos com sucesso no sistema da 88 Mobility.');
@@ -238,6 +254,22 @@ export function ProfileScreen() {
         updatedAt: new Date().toISOString(),
       };
       await AsyncStorage.setItem(PIX_STORAGE_KEY, JSON.stringify(payload));
+
+      // Tenta sincronizar com o banco de dados SQLite do Backend
+      try {
+        const backendUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+        fetch(`${backendUrl}/drivers/pix`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pixKeyType,
+            pixKey: trimmedKey,
+            pixBankName: pixBank.trim() || 'Banco Principal',
+            pixAccountHolder: pixOwnerName.trim() || driver?.name || 'Abel Magalhães',
+          }),
+        }).catch(() => {});
+      } catch {}
+
       setIsSavingPix(false);
       setShowPixModal(false);
       Alert.alert('Chave PIX Cadastrada! 💳🎉', 'Sua chave PIX para repasse de 88% foi configurada com sucesso.');

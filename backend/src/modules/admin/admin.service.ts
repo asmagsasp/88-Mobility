@@ -1,7 +1,7 @@
 import { prisma } from '../../config/database';
 import { AppError } from '../../shared/middleware/error.middleware';
 import { PlatformStats, PaginatedResponse } from '../../shared/types';
-import { RideStatus } from '@prisma/client';
+import { RideStatus } from '../../shared/types/enums';
 
 // ============================================================
 // Admin Service — Gerenciamento da plataforma pelo administrador

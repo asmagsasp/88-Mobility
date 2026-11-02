@@ -11,7 +11,14 @@ import {
 
 const router = Router();
 
-// Todas as rotas de corrida requerem autenticação
+// ============================================================
+// Rotas de sincronização em tempo real (SQLite persistence)
+// Permite sincronização rápida e confiável entre passageiro e motorista
+// ============================================================
+router.post('/sync/events', ridesController.publishSyncEvent);
+router.get('/sync/events', ridesController.getSyncEvents);
+
+// Todas as rotas abaixo requerem autenticação
 router.use(authMiddleware);
 
 // ============================================================

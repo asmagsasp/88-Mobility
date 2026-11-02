@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { UserRole } from '@prisma/client';
+import { UserRole } from '../../shared/types/enums';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../shared/middleware/error.middleware';
@@ -67,8 +67,9 @@ export async function registerPassenger(dto: RegisterPassengerDto): Promise<{
     select: { id: true, name: true, email: true, role: true },
   });
 
-  const tokens = generateTokens(user.id, user.role);
-  return { user, tokens };
+  const role = user.role as UserRole;
+  const tokens = generateTokens(user.id, role);
+  return { user: { ...user, role }, tokens };
 }
 
 /**
@@ -130,9 +131,10 @@ export async function registerDriver(dto: RegisterDriverDto): Promise<{
     return newUser;
   });
 
-  const tokens = generateTokens(user.id, user.role);
+  const role = user.role as UserRole;
+  const tokens = generateTokens(user.id, role);
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: { id: user.id, name: user.name, email: user.email, role },
     tokens,
   };
 }
@@ -161,9 +163,10 @@ export async function login(dto: LoginDto): Promise<{
     throw new AppError('Email ou senha incorretos', 401);
   }
 
-  const tokens = generateTokens(user.id, user.role);
+  const role = user.role as UserRole;
+  const tokens = generateTokens(user.id, role);
   return {
-    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+    user: { id: user.id, name: user.name, email: user.email, role },
     tokens,
   };
 }
@@ -190,7 +193,7 @@ export async function refreshToken(token: string): Promise<AuthTokens> {
     throw new AppError('Usuário não encontrado ou desativado', 401);
   }
 
-  return generateTokens(user.id, user.role);
+  return generateTokens(user.id, user.role as UserRole);
 }
 
 /**
