@@ -105,9 +105,11 @@ export function HomeScreen() {
     })();
   }, []);
 
-  // Solicita permissão e obtém GPS real do dispositivo
+  // Solicita permissão e obtém GPS real do dispositivo com resposta imediata e rastreamento contínuo
   useEffect(() => {
     let isMounted = true;
+    let locationSubscription: Location.LocationSubscription | null = null;
+
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -115,18 +117,42 @@ export function HomeScreen() {
           if (isMounted) setGpsReady(true);
           return;
         }
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (isMounted && loc?.coords) {
-          const newCoords = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-          setCoords(newCoords);
+
+        // 1. Obtém imediatamente a última localização conhecida do aparelho (sem atraso de satélite)
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (isMounted && lastKnown?.coords) {
+          setCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude });
           setGpsReady(true);
         }
+
+        // 2. Obtém a localização de alta precisão do GPS
+        const currentLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        if (isMounted && currentLoc?.coords) {
+          setCoords({ lat: currentLoc.coords.latitude, lng: currentLoc.coords.longitude });
+          setGpsReady(true);
+        }
+
+        // 3. Acompanha o deslocamento em tempo real continuamente
+        locationSubscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
+          (loc) => {
+            if (isMounted && loc?.coords) {
+              setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+            }
+          }
+        );
       } catch (err) {
         console.warn('Erro ao obter localização do passageiro:', err);
         if (isMounted) setGpsReady(true);
       }
     })();
-    return () => { isMounted = false; };
+
+    return () => {
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
   }, []);
 
   // Busca e autocompleta endereços em tempo real
@@ -141,7 +167,8 @@ export function HomeScreen() {
     setIsSearching(true);
     const timeoutId = setTimeout(async () => {
       try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=6&countrycodes=br`;
+        const viewboxParam = coords ? `&viewbox=${coords.lng - 0.4},${coords.lat + 0.4},${coords.lng + 0.4},${coords.lat - 0.4}&bounded=0` : '';
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
         const res = await fetch(url, {
           headers: {
             'User-Agent': '88Mobility-PassengerApp/1.0',

@@ -243,14 +243,24 @@ export function OSMMap({
             var radarPulseMarker = null;
             var nearbyDriversGroup = L.layerGroup().addTo(map);
 
-            // Marcador Fixo do Passageiro (Você está aqui)
+            // Marcador do Passageiro (Você está aqui)
             var passengerIcon = L.divIcon({
               className: 'passenger-custom-pin',
               html: '<div class="passenger-pulse-dot"></div>',
               iconSize: [20, 20],
               iconAnchor: [10, 10]
             });
-            L.marker([${latitude}, ${longitude}], { icon: passengerIcon, zIndexOffset: 1000 }).addTo(map).bindPopup('Ponto de Embarque (Você)');
+            var userMarker = L.marker([${latitude}, ${longitude}], { icon: passengerIcon, zIndexOffset: 1000 }).addTo(map).bindPopup('Ponto de Embarque (Você)');
+
+            // Atualiza a posição real do passageiro e recentraliza o mapa
+            window.updateUserLocation = function(newLat, newLng, shouldCenter) {
+              if (userMarker) {
+                userMarker.setLatLng([newLat, newLng]);
+              }
+              if (shouldCenter && map) {
+                map.setView([newLat, newLng], map.getZoom() || 15, { animate: true });
+              }
+            };
 
             // SVG do Carrinho do 99
             var carSvgHtml = \`
@@ -370,6 +380,7 @@ export function OSMMap({
             window.setSearchingRadar = function(isSearching, radiusKm) {
               var rKm = radiusKm || 10;
               var radiusMeters = rKm * 1000;
+              var curCenter = userMarker ? userMarker.getLatLng() : L.latLng(${latitude}, ${longitude});
 
               if (!isSearching) {
                 if (radarCircle) { map.removeLayer(radarCircle); radarCircle = null; }
@@ -380,7 +391,7 @@ export function OSMMap({
 
               // A. Círculo geográfico no mapa com o raio exato de 10 km
               if (!radarCircle) {
-                radarCircle = L.circle([${latitude}, ${longitude}], {
+                radarCircle = L.circle(curCenter, {
                   radius: radiusMeters,
                   color: '#F59E0B',
                   weight: 2,
@@ -388,6 +399,8 @@ export function OSMMap({
                   fillColor: '#F59E0B',
                   fillOpacity: 0.08
                 }).addTo(map);
+              } else {
+                radarCircle.setLatLng(curCenter);
               }
 
               // B. Ondas de Radar e Sonar pulsante concêntrico (estilo 99)
@@ -406,7 +419,9 @@ export function OSMMap({
                   iconSize: [260, 260],
                   iconAnchor: [130, 130]
                 });
-                radarPulseMarker = L.marker([${latitude}, ${longitude}], { icon: radarIcon, interactive: false, zIndexOffset: 500 }).addTo(map);
+                radarPulseMarker = L.marker(curCenter, { icon: radarIcon, interactive: false, zIndexOffset: 500 }).addTo(map);
+              } else {
+                radarPulseMarker.setLatLng(curCenter);
               }
 
               // C. Mini carrinhos de motoristas parceiros pontilhados ao redor simulando escaneamento
@@ -426,13 +441,13 @@ export function OSMMap({
                   iconSize: [24, 24],
                   iconAnchor: [12, 12]
                 });
-                var dm = L.marker([${latitude} + d.dLat, ${longitude} + d.dLng], { icon: driverMiniIcon, zIndexOffset: 800 });
+                var dm = L.marker([curCenter.lat + d.dLat, curCenter.lng + d.dLng], { icon: driverMiniIcon, zIndexOffset: 800 });
                 if (d.title) dm.bindPopup(d.title);
                 nearbyDriversGroup.addLayer(dm);
               });
 
               // Centraliza e ajusta visão suavemente
-              map.setView([${latitude}, ${longitude}], 14);
+              map.setView(curCenter, 14);
             };
 
             // Avisa o React Native que o mapa Leaflet está pronto
@@ -512,6 +527,20 @@ export function OSMMap({
       webViewRef.current.injectJavaScript(js);
     }
   }, [isSearching, searchRadiusKm, mapReady]);
+
+  // Atualiza a posição real do passageiro e recentraliza o mapa quando sem rota ativa
+  useEffect(() => {
+    if (webViewRef.current && mapReady && latitude && longitude) {
+      const shouldCenter = routeCoordinates.length === 0;
+      const js = `
+        if (window.updateUserLocation) {
+          window.updateUserLocation(${latitude}, ${longitude}, ${shouldCenter ? 'true' : 'false'});
+        }
+        true;
+      `;
+      webViewRef.current.injectJavaScript(js);
+    }
+  }, [latitude, longitude, mapReady, routeCoordinates.length]);
 
   return (
     <View style={styles.container}>

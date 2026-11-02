@@ -76,9 +76,11 @@ export function HomeScreen() {
     loadTodayStats();
   }, [activeRide]);
 
-  // Solicita permissão e obtém localização real GPS
+  // Solicita permissão e obtém localização real GPS com resposta imediata e acompanhamento contínuo
   useEffect(() => {
     let isMounted = true;
+    let locationSubscription: Location.LocationSubscription | null = null;
+
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -86,21 +88,54 @@ export function HomeScreen() {
           if (isMounted) setGpsReady(true);
           return;
         }
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        if (isMounted && loc?.coords) {
-          const lat = loc.coords.latitude;
-          const lng = loc.coords.longitude;
+
+        // 1. Obtém imediatamente a última posição conhecida (resposta instantânea, sem atraso de satélite)
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (isMounted && lastKnown?.coords) {
+          const lat = lastKnown.coords.latitude;
+          const lng = lastKnown.coords.longitude;
           setCoords({ lat, lng });
           setCarPosition({ latitude: lat, longitude: lng, heading: 0 });
           setGpsReady(true);
         }
+
+        // 2. Obtém a posição de alta precisão GPS atual
+        const currentLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        if (isMounted && currentLoc?.coords) {
+          const lat = currentLoc.coords.latitude;
+          const lng = currentLoc.coords.longitude;
+          setCoords({ lat, lng });
+          setCarPosition({ latitude: lat, longitude: lng, heading: 0 });
+          setGpsReady(true);
+        }
+
+        // 3. Acompanha o deslocamento real do motorista continuamente
+        locationSubscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
+          (loc) => {
+            if (isMounted && loc?.coords) {
+              const lat = loc.coords.latitude;
+              const lng = loc.coords.longitude;
+              setCoords({ lat, lng });
+              if (!activeRide) {
+                setCarPosition({ latitude: lat, longitude: lng, heading: loc.coords.heading || 0 });
+              }
+            }
+          }
+        );
       } catch (err) {
         console.warn('Erro ao obter localização do motorista:', err);
         if (isMounted) setGpsReady(true);
       }
     })();
-    return () => { isMounted = false; };
-  }, []);
+
+    return () => {
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [activeRide]);
 
   // Polling em tempo real para receber chamadas de passageiros quando estiver Online
   useEffect(() => {

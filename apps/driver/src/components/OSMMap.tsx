@@ -264,6 +264,13 @@ export function OSMMap({
               });
             };
 
+            // 4. Centralizar mapa na localização real do motorista
+            window.centerMap = function(newLat, newLng, newZoom) {
+              if (map) {
+                map.setView([newLat, newLng], newZoom || 16, { animate: true });
+              }
+            };
+
             // Avisa o React Native que o mapa Leaflet está pronto
             setTimeout(function() {
               if (window.ReactNativeWebView) {
@@ -327,6 +334,24 @@ export function OSMMap({
       webViewRef.current.injectJavaScript(js);
     }
   }, [markers, mapReady]);
+
+  // Centraliza o mapa na localização real do motorista sempre que o GPS atualizar (quando sem rota ativa)
+  useEffect(() => {
+    if (webViewRef.current && mapReady && latitude && longitude) {
+      if (routeCoordinates.length === 0) {
+        const js = `
+          if (window.centerMap) {
+            window.centerMap(${latitude}, ${longitude}, ${zoom});
+          }
+          if (window.updateCarPosition && !${carPosition ? 'true' : 'false'}) {
+            window.updateCarPosition(${latitude}, ${longitude}, 0);
+          }
+          true;
+        `;
+        webViewRef.current.injectJavaScript(js);
+      }
+    }
+  }, [latitude, longitude, zoom, mapReady, routeCoordinates.length]);
 
   return (
     <View style={styles.container}>
