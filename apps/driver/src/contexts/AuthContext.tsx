@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: email.split('@')[0] || 'Abel Magalhães',
         email: email.trim(),
         phone: '(11) 98888-8888',
-        vehicle: 'Carro Cadastrado',
+        vehicle: 'Honda Fit',
         vehiclePlate: 'BRA-8888',
         rating: 5.0,
         totalRides: 0,

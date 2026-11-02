@@ -228,11 +228,14 @@ export function HomeScreen() {
         const nextPt = coordsList[Math.min(currentIndex + 1, coordsList.length - 1)];
         const heading = calculateBearing(currentPt.latitude, currentPt.longitude, nextPt.latitude, nextPt.longitude);
 
+        const driverVehicleName = driver?.vehicle || 'Honda Fit';
+        const driverFirstName = driver?.name?.split(' ')[0] || 'Abel';
+
         setCarPosition({
           latitude: currentPt.latitude,
           longitude: currentPt.longitude,
           heading,
-          label: 'Abel · 99',
+          label: `${driverFirstName} · ${driverVehicleName}`,
         });
 
         // Envia posição em tempo real para o app do passageiro
@@ -276,7 +279,7 @@ export function HomeScreen() {
       rideId: current.id,
       driver: {
         name: driver?.name || 'Abel Magalhães',
-        vehicle: driver?.vehicle || 'Toyota Corolla 2023',
+        vehicle: driver?.vehicle || 'Honda Fit',
         plate: driver?.vehiclePlate || 'BRA-8888',
         phone: driver?.phone || '(11) 98888-8888',
         rating: driver?.rating || 5.0,
@@ -450,7 +453,7 @@ export function HomeScreen() {
             <View>
               <Text style={styles.driverName}>{driver?.name || 'Motorista Parceiro'}</Text>
               <Text style={styles.vehicleText}>
-                {driver?.vehicle ? `${driver.vehicle} · ${driver.vehiclePlate}` : (driver?.vehiclePlate || 'Toyota Corolla · BRA-8888')}
+                {driver?.vehicle ? `${driver.vehicle} · ${driver.vehiclePlate}` : 'Honda Fit · BRA-8888'}
               </Text>
             </View>
           </View>

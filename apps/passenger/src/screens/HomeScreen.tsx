@@ -198,20 +198,22 @@ export function HomeScreen() {
   const driverShare = totalAmount * 0.88;
 
   // Carrega e anima o trajeto do motorista até o passageiro
-  const loadDriverRouteToPassenger = async (startLat: number, startLng: number) => {
+  const loadDriverRouteToPassenger = async (startLat: number, startLng: number, vehicleName: string = 'Honda Fit') => {
     try {
       const route = await fetchPassengerRoute(startLat, startLng, coords.lat, coords.lng);
       setRouteCoordinates(route.coordinates);
+
+      const carLabel = `Abel · ${vehicleName}`;
 
       if (route.coordinates.length > 0) {
         setCarPosition({
           latitude: route.coordinates[0].latitude,
           longitude: route.coordinates[0].longitude,
           heading: 0,
-          label: 'Abel · 99',
+          label: carLabel,
         });
 
-        // Simulação fluida de deslocamento do carrinho 99 caso não cheguem pacotes contínuos
+        // Simulação fluida de deslocamento do carrinho caso não cheguem pacotes contínuos
         if (carSimInterval.current) clearInterval(carSimInterval.current);
         let idx = 0;
         const pts = route.coordinates;
@@ -231,7 +233,7 @@ export function HomeScreen() {
             latitude: cur.latitude,
             longitude: cur.longitude,
             heading,
-            label: 'Abel · 99',
+            label: carLabel,
           });
         }, 1600);
       }
@@ -241,11 +243,13 @@ export function HomeScreen() {
   };
 
   // Carrega trajeto até o destino final quando a viagem inicia
-  const loadTripRouteToDestination = async (startLat: number, startLng: number, destLat: number, destLng: number) => {
+  const loadTripRouteToDestination = async (startLat: number, startLng: number, destLat: number, destLng: number, vehicleName: string = 'Honda Fit') => {
     try {
       if (carSimInterval.current) clearInterval(carSimInterval.current);
       const route = await fetchPassengerRoute(startLat, startLng, destLat, destLng);
       setRouteCoordinates(route.coordinates);
+
+      const carLabel = `Abel · ${vehicleName}`;
 
       let idx = 0;
       const pts = route.coordinates;
@@ -262,7 +266,7 @@ export function HomeScreen() {
           latitude: cur.latitude,
           longitude: cur.longitude,
           heading,
-          label: 'Abel · 99',
+          label: carLabel,
         });
       }, 1600);
     } catch (e) {
@@ -299,19 +303,21 @@ export function HomeScreen() {
               platformShare: PLATFORM_FEE,
               status: 'arriving',
             });
+            const vehicleName = ev.driver.vehicle || 'Honda Fit';
             setRideStatus('arriving');
             setStep('active');
 
-            // Inicia o acompanhamento da rota e do carrinho do 99 até o passageiro
-            loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude);
+            // Inicia o acompanhamento da rota e do carrinho até o passageiro
+            loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude, vehicleName);
 
           } else if (ev.type === 'DRIVER_LOCATION' && ev.rideId === currentRideId) {
-            // Posição em tempo real recebida do GPS do motorista
+            // Posição em tempo real recebida do GPS do motorista com seu carro cadastrado
+            const vehicleName = activeRide?.driverVehicle || 'Honda Fit';
             setCarPosition({
               latitude: ev.latitude,
               longitude: ev.longitude,
               heading: ev.heading,
-              label: 'Abel · 99',
+              label: `Abel · ${vehicleName}`,
             });
 
           } else if (ev.type === 'ARRIVED_PASSENGER' && ev.rideId === currentRideId) {
@@ -323,7 +329,8 @@ export function HomeScreen() {
             // Motorista iniciou a viagem até o destino
             setRideStatus('in_trip');
             if (destination) {
-              loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng);
+              const vehicleName = activeRide?.driverVehicle || 'Honda Fit';
+              loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng, vehicleName);
             }
 
           } else if (ev.type === 'DECLINE_RIDE' && ev.rideId === currentRideId) {
@@ -518,7 +525,7 @@ export function HomeScreen() {
     latitude: initialDriverPos.latitude,
     longitude: initialDriverPos.longitude,
     heading: 45,
-    label: 'Abel · 99',
+    label: activeRide?.driverVehicle ? `Abel · ${activeRide.driverVehicle}` : 'Abel · Honda Fit',
   } : null);
 
   return (
@@ -556,8 +563,8 @@ export function HomeScreen() {
           </Text>
           <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
             {step === 'active'
-              ? (rideStatus === 'arrived' ? '🟢 Motorista no local de embarque!' : '🟡 Motorista a caminho até você')
-              : '🟢 Motorista Abel Magalhães disponível perto'}
+              ? (rideStatus === 'arrived' ? `🟢 ${activeRide?.driverVehicle || 'Honda Fit'} no local de embarque!` : `🟡 ${activeRide?.driverVehicle || 'Honda Fit'} a caminho`)
+              : `🟢 Motorista Abel Magalhães (${activeRide?.driverVehicle || 'Honda Fit'}) disponível perto`}
           </Text>
         </View>
         <TouchableOpacity onPress={logout} style={styles.logoutBtn}>
@@ -576,9 +583,9 @@ export function HomeScreen() {
             rideStatus === 'arrived' ? styles.statusBannerArrived : styles.statusBannerArriving,
           ]}>
             <Text style={styles.statusBannerText}>
-              {rideStatus === 'arriving' && '🚗 Acompanhando motorista no mapa até seu local'}
-              {rideStatus === 'arrived' && '📍 Motorista chegou! Embarque no Toyota Corolla'}
-              {rideStatus === 'in_trip' && '🚀 Viagem em andamento para seu destino'}
+              {rideStatus === 'arriving' && `🚗 Acompanhando ${activeRide.driverVehicle || 'Honda Fit'} no mapa até seu local`}
+              {rideStatus === 'arrived' && `📍 Motorista chegou! Embarque no ${activeRide.driverVehicle || 'Honda Fit'} (${activeRide.driverPlate || 'BRA-8888'})`}
+              {rideStatus === 'in_trip' && `🚀 Viagem em andamento para seu destino no ${activeRide.driverVehicle || 'Honda Fit'}`}
             </Text>
           </View>
 

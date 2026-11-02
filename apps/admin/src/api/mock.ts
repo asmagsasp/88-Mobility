@@ -36,7 +36,7 @@ let peakConfig: PeakHourConfig = {
 };
 
 let drivers: Driver[] = [
-  { id: 'd1', name: 'Abel Magalhães', email: 'abel.souza.magalhaes@hotmail.com', phone: '(11) 98888-8888', cpf: '123.456.789-00', vehicle: 'Toyota Corolla 2023', vehiclePlate: 'BRA-8888', vehicleYear: 2023, rating: 5.0, totalRides: 342, totalKm: 4820, status: 'online', createdAt: '2024-01-15T00:00:00Z' },
+  { id: 'd1', name: 'Abel Magalhães', email: 'abel.souza.magalhaes@hotmail.com', phone: '(11) 98888-8888', cpf: '123.456.789-00', vehicle: 'Honda Fit', vehiclePlate: 'BRA-8888', vehicleYear: 2021, rating: 5.0, totalRides: 342, totalKm: 4820, status: 'online', createdAt: '2024-01-15T00:00:00Z' },
   { id: 'd2', name: 'Marcos Lima', email: 'marcos@gmail.com', phone: '(11) 99999-0002', cpf: '222.333.444-55', vehicle: 'Honda Civic 2020', vehiclePlate: 'DEF-5678', vehicleYear: 2020, rating: 4.8, totalRides: 218, totalKm: 3100, status: 'online', createdAt: '2024-02-20T00:00:00Z' },
   { id: 'd3', name: 'José Santos', email: 'jose@gmail.com', phone: '(11) 99999-0003', cpf: '333.444.555-66', vehicle: 'VW Polo 2022', vehiclePlate: 'GHI-9012', vehicleYear: 2022, rating: 4.9, totalRides: 521, totalKm: 7340, status: 'offline', createdAt: '2023-11-05T00:00:00Z' },
   { id: 'd4', name: 'Paulo Ferreira', email: 'paulo@gmail.com', phone: '(11) 99999-0004', cpf: '444.555.666-77', vehicle: 'Hyundai HB20 2021', vehiclePlate: 'JKL-3456', vehicleYear: 2021, rating: 0, totalRides: 0, totalKm: 0, status: 'pending', createdAt: '2026-10-28T00:00:00Z' },
