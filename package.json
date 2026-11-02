@@ -1,0 +1,16 @@
+{
+  "name": "88-mobility",
+  "version": "1.0.0",
+  "private": true,
+  "description": "88 Mobility - Plataforma de mobilidade urbana (88% motorista / 12% plataforma)",
+  "scripts": {
+    "studio": "npm --prefix backend run prisma:studio",
+    "prisma:studio": "npm --prefix backend run prisma:studio",
+    "backend": "npm --prefix backend run dev",
+    "backend:seed": "npm --prefix backend run seed",
+    "backend:push": "npm --prefix backend run prisma:push",
+    "driver": "npm --prefix apps/driver start",
+    "passenger": "npm --prefix apps/passenger start",
+    "admin": "npm --prefix apps/admin dev"
+  }
+}
