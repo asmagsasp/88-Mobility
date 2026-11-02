@@ -1,21 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
   ActivityIndicator, Alert, Image,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { Spacing, Radius } from '../constants/theme';
 
+const REMEMBER_KEY = '88mobility_passenger_remember';
+
 /**
  * Tela de login do passageiro com suporte aos temas Claro e Escuro
+ * e funcionalidade "Lembrar meus dados de acesso"
  */
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const { login, isLoading } = useAuth();
   const { colors, isDark } = useTheme();
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail]           = useState('');
+  const [password, setPassword]     = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
+
+  // Carrega credenciais salvas na inicialização
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem(REMEMBER_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.email) setEmail(parsed.email);
+          if (parsed.password) setPassword(parsed.password);
+          setRememberMe(true);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar dados salvos do passageiro:', err);
+      }
+    })();
+  }, []);
 
   const handleLogin = async () => {
     const trimmedEmail = email.trim();
@@ -44,6 +66,17 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
         'A senha deve conter ao menos:\n• 8 caracteres\n• 1 letra maiúscula\n• 1 letra minúscula\n• 1 número\n• 1 caractere especial (!@#$%^&*)'
       );
       return;
+    }
+
+    // Salva ou remove credenciais com base na opção "Lembrar Senha"
+    try {
+      if (rememberMe) {
+        await AsyncStorage.setItem(REMEMBER_KEY, JSON.stringify({ email: trimmedEmail, password: trimmedPass }));
+      } else {
+        await AsyncStorage.removeItem(REMEMBER_KEY);
+      }
+    } catch (e) {
+      console.warn('Erro ao salvar no storage:', e);
     }
 
     try {
@@ -101,6 +134,26 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
             />
           </View>
 
+          {/* Opção Lembrar Senha */}
+          <TouchableOpacity
+            style={styles.rememberRow}
+            onPress={() => setRememberMe(!rememberMe)}
+            activeOpacity={0.8}
+          >
+            <View
+              style={[
+                styles.checkbox,
+                { borderColor: colors.border },
+                rememberMe && { backgroundColor: colors.amber, borderColor: colors.amber },
+              ]}
+            >
+              {rememberMe && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={[styles.rememberText, { color: colors.textSecondary }]}>
+              Lembrar meus dados de acesso
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.btn, { backgroundColor: colors.amber }, isLoading && styles.btnDisabled]}
             onPress={handleLogin}
@@ -149,13 +202,6 @@ const styles = StyleSheet.create({
   },
   formTitle:    { fontSize: 22, fontWeight: '700', marginBottom: 4 },
   formSubtitle: { fontSize: 14, marginBottom: Spacing.lg },
-  devHint: {
-    borderWidth: 1,
-    borderRadius: Radius.sm,
-    padding: 10,
-    marginBottom: Spacing.md,
-  },
-  devHintText: { fontSize: 12, fontWeight: '600' },
   fieldGroup:  { marginBottom: Spacing.md },
   label: {
     fontSize: 13,
@@ -173,6 +219,31 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: Spacing.sm,
+    paddingVertical: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkmark: {
+    color: '#0F172A',
+    fontSize: 13,
+    fontWeight: '900',
+    lineHeight: 15,
+  },
+  rememberText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   btn: {
     borderRadius: Radius.md,

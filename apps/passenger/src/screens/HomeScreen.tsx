@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, FlatList, Alert, ActivityIndicator, Image, Linking,
+  Keyboard, Platform,
 } from 'react-native';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -77,6 +78,23 @@ export function HomeScreen() {
   const [activeRide, setActiveRide]       = useState<Partial<Ride> | null>(null);
   const [rideStatus, setRideStatus]       = useState<ActiveRideStatus>('arriving');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Monitora altura do teclado virtual para ajuste fluido
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Rota e Carrinho 99
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
@@ -155,10 +173,10 @@ export function HomeScreen() {
     };
   }, []);
 
-  // Busca e autocompleta endereços em tempo real
+  // Busca e autocompleta endereços em tempo real com suporte a numeração de residência
   useEffect(() => {
     const trimmed = search.trim();
-    if (trimmed.length < 3) {
+    if (trimmed.length < 2) {
       setSuggestions(recentDestinations);
       setIsSearching(false);
       return;
@@ -167,20 +185,64 @@ export function HomeScreen() {
     setIsSearching(true);
     const timeoutId = setTimeout(async () => {
       try {
+        // Extrai número predial/residencial (ex: "Rua Augusta 1500", "Av Paulista, 1000", "Rua das Flores nº 45B", "Rua 15 de Novembro, 120")
+        const endNumMatch = trimmed.match(/(?:,\s*|\s+n[º°]?\s*|\s+)(\d{1,6}[a-zA-Z]?)$/i);
+        const commaNumMatch = trimmed.match(/,\s*(\d{1,6}[a-zA-Z]?)/i);
+        const typedNumber = endNumMatch ? endNumMatch[1] : (commaNumMatch ? commaNumMatch[1] : null);
+
+        let queryWithoutNumber = trimmed;
+        if (typedNumber) {
+          queryWithoutNumber = trimmed
+            .replace(new RegExp(`(?:,\\s*|\\s+n[º°]?\\s*|\\s+)${typedNumber}$`, 'i'), '')
+            .replace(new RegExp(`,\\s*${typedNumber}`, 'i'), '')
+            .trim();
+        }
+
         const viewboxParam = coords ? `&viewbox=${coords.lng - 0.4},${coords.lat + 0.4},${coords.lng + 0.4},${coords.lat - 0.4}&bounded=0` : '';
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
-        const res = await fetch(url, {
-          headers: {
-            'User-Agent': '88Mobility-PassengerApp/1.0',
-            'Accept-Language': 'pt-BR,pt;q=0.9',
-          },
-        });
-        if (!res.ok) throw new Error('Falha na busca de endereços');
-        const data = await res.json();
+        let data: any[] = [];
+
+        // 1. Tenta buscar endereço com o texto original
+        try {
+          const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
+          const res = await fetch(url, {
+            headers: {
+              'User-Agent': '88Mobility-PassengerApp/1.0',
+              'Accept-Language': 'pt-BR,pt;q=0.9',
+            },
+          });
+          if (res.ok) {
+            data = await res.json();
+          }
+        } catch {}
+
+        // 2. Se a busca com número não retornou resultados, busca pelo nome da rua e preserva o número digitado
+        if ((!Array.isArray(data) || data.length === 0) && typedNumber && queryWithoutNumber.length >= 3) {
+          try {
+            const fallbackUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
+            const fbRes = await fetch(fallbackUrl, {
+              headers: {
+                'User-Agent': '88Mobility-PassengerApp/1.0',
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+              },
+            });
+            if (fbRes.ok) {
+              data = await fbRes.json();
+            }
+          } catch {}
+        }
 
         if (Array.isArray(data) && data.length > 0) {
           const parsed: AddressSuggestion[] = data.map((item: any) => {
-            const road = item.address?.road || item.address?.pedestrian || item.display_name.split(',')[0];
+            const rawRoad = item.address?.road || item.address?.pedestrian || item.address?.suburb || item.display_name.split(',')[0].trim();
+            // Pega o número retornado pela API ou preserva com exatidão o número digitado pelo passageiro
+            const houseNum = item.address?.house_number || typedNumber;
+
+            // Garante que o número apareça no label do alfinete
+            let formattedLabel = rawRoad;
+            if (houseNum && !rawRoad.toLowerCase().includes(houseNum.toLowerCase())) {
+              formattedLabel = `${rawRoad}, ${houseNum}`;
+            }
+
             const suburb = item.address?.suburb || item.address?.neighbourhood || '';
             const city = item.address?.city || item.address?.town || item.address?.municipality || '';
             const state = item.address?.state || '';
@@ -188,7 +250,7 @@ export function HomeScreen() {
 
             return {
               id: String(item.place_id),
-              label: road,
+              label: formattedLabel,
               address: sub,
               lat: parseFloat(item.lat),
               lng: parseFloat(item.lon),
@@ -196,13 +258,14 @@ export function HomeScreen() {
           });
           setSuggestions(parsed);
         } else {
+          // Se não encontrou no OSM, oferece o endereço exato digitado pelo usuário (com o número)
           setSuggestions([
             {
               id: `custom-${Date.now()}`,
               label: trimmed,
               address: 'Endereço digitado pelo passageiro',
-              lat: coords.lat + 0.02,
-              lng: coords.lng + 0.02,
+              lat: coords.lat + 0.012,
+              lng: coords.lng + 0.012,
             },
           ]);
         }
@@ -211,7 +274,7 @@ export function HomeScreen() {
       } finally {
         setIsSearching(false);
       }
-    }, 400);
+    }, 350);
 
     return () => clearTimeout(timeoutId);
   }, [search, coords, recentDestinations]);
@@ -410,6 +473,7 @@ export function HomeScreen() {
   }, [step, currentRideId, destination, distanceKm, totalAmount, driverShare, activeRide]);
 
   const selectDestination = async (item: AddressSuggestion) => {
+    Keyboard.dismiss();
     setDest(item);
     setSearch(item.label);
     setStep('confirming');
@@ -757,52 +821,130 @@ export function HomeScreen() {
         </View>
       )}
 
-      {/* Caixa de busca quando em repouso */}
-      {(step === 'idle' || step === 'selecting_destination') && (
-        <View style={[styles.searchBoxSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+      {/* 1. Modal / Tela de Busca de Destino no Topo (O teclado NUNCA sobrepõe) */}
+      {step === 'selecting_destination' && (
+        <View
+          style={[
+            styles.destinationSearchOverlay,
+            {
+              backgroundColor: colors.background,
+              paddingBottom: Math.max(Spacing.md, keyboardHeight),
+            },
+          ]}
+        >
+          {/* Header com botão voltar e título */}
+          <View style={styles.searchOverlayHeader}>
+            <TouchableOpacity
+              style={[styles.searchBackBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => {
+                Keyboard.dismiss();
+                setSearch('');
+                setStep('idle');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.searchBackText, { color: colors.text }]}>←</Text>
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.searchOverlayTitle, { color: colors.text }]}>Para onde vamos?</Text>
+              <Text style={[styles.searchOverlaySub, { color: colors.textSecondary }]}>
+                Digite o endereço com o número da residência
+              </Text>
+            </View>
+          </View>
+
+          {/* Campo de Busca no TOPO */}
+          <View style={[styles.searchInputWrapperActive, { backgroundColor: colors.card, borderColor: colors.amber }]}>
+            <Text style={styles.searchIcon}>🔍</Text>
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Ex: Rua Augusta, 1500 ou Av Paulista..."
+              placeholderTextColor={colors.textSecondary}
+              value={search}
+              autoFocus={true}
+              returnKeyType="search"
+              onChangeText={(text) => setSearch(text)}
+            />
+            {search.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setSearch('')}
+                style={styles.clearSearchBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 16, fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            )}
+            {isSearchingAddress && <ActivityIndicator size="small" color={Colors.amber} />}
+          </View>
+
+          {/* Lista de Sugestões com alfinetes vermelhos */}
+          <FlatList
+            data={suggestions}
+            keyExtractor={(item) => item.id}
+            style={styles.suggestionsListFull}
+            keyboardShouldPersistTaps="always"
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
+                onPress={() => selectDestination(item)}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.sugPinBg, { backgroundColor: '#FEE2E2' }]}>
+                  <Text style={styles.sugPin}>📍</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.sugLabel, { color: colors.text }]}>{item.label}</Text>
+                  <Text style={[styles.sugAddress, { color: colors.textSecondary }]} numberOfLines={1}>
+                    {item.address}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={
+              !isSearchingAddress && search.trim().length >= 3 ? (
+                <View style={styles.emptySugContainer}>
+                  <Text style={[styles.emptySugText, { color: colors.textSecondary }]}>
+                    Nenhum endereço exato encontrado no mapa para "{search}".
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.customAddrBtn, { backgroundColor: Colors.amber }]}
+                    onPress={() => {
+                      selectDestination({
+                        id: `custom-${Date.now()}`,
+                        label: search.trim(),
+                        address: 'Endereço digitado pelo passageiro',
+                        lat: coords.lat + 0.015,
+                        lng: coords.lng + 0.015,
+                      });
+                    }}
+                  >
+                    <Text style={styles.customAddrBtnText}>📍 Usar "{search.trim()}" como destino</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : undefined
+            }
+          />
+        </View>
+      )}
+
+      {/* 2. Caixa de busca quando em repouso (Bottom Sheet) */}
+      {step === 'idle' && (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setStep('selecting_destination')}
+          style={[styles.searchBoxSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}
+        >
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
           <Text style={[styles.searchTitle, { color: colors.text }]}>Para onde vamos?</Text>
 
           <View style={[styles.searchInputWrapper, { backgroundColor: colors.slate50, borderColor: colors.border }]}>
             <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder="Digite o endereço ou local..."
-              placeholderTextColor={colors.textSecondary}
-              value={search}
-              onChangeText={(text) => {
-                setSearch(text);
-                if (text.length > 0) setStep('selecting_destination');
-                else setStep('idle');
-              }}
-              onFocus={() => setStep('selecting_destination')}
-            />
-            {isSearchingAddress && <ActivityIndicator size="small" color={Colors.amber} />}
+            <Text style={[styles.searchInputPlaceholder, { color: colors.textSecondary }]}>
+              {search.trim() ? search : 'Digite o endereço ou local...'}
+            </Text>
           </View>
-
-          {step === 'selecting_destination' && (
-            <FlatList
-              data={suggestions}
-              keyExtractor={(item) => item.id}
-              style={styles.suggestionsList}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.suggestionItem, { borderBottomColor: colors.border }]}
-                  onPress={() => selectDestination(item)}
-                >
-                  <Text style={styles.sugPin}>📍</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.sugLabel, { color: colors.text }]}>{item.label}</Text>
-                    <Text style={[styles.sugAddress, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {item.address}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              )}
-            />
-          )}
-        </View>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -1245,6 +1387,91 @@ const styles = StyleSheet.create({
   sugAddress: {
     fontSize: 12,
     marginTop: 2,
+  },
+  destinationSearchOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: Platform.OS === 'android' ? 44 : 54,
+    paddingHorizontal: Spacing.md,
+    zIndex: 100,
+  },
+  searchOverlayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: Spacing.md,
+  },
+  searchBackBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBackText: {
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 24,
+  },
+  searchOverlayTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  searchOverlaySub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  searchInputWrapperActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    marginBottom: Spacing.sm,
+  },
+  searchInputPlaceholder: {
+    fontSize: 15,
+    flex: 1,
+  },
+  clearSearchBtn: {
+    padding: 6,
+  },
+  suggestionsListFull: {
+    flex: 1,
+  },
+  sugPinBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptySugContainer: {
+    padding: Spacing.lg,
+    alignItems: 'center',
+    marginTop: Spacing.md,
+  },
+  emptySugText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  customAddrBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+  },
+  customAddrBtnText: {
+    color: '#0F172A',
+    fontWeight: '700',
+    fontSize: 14,
   },
   gpsOverlay: {
     ...StyleSheet.absoluteFill,

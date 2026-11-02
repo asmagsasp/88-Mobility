@@ -131,18 +131,41 @@ export function OSMMap({
               pointer-events: none;
             }
 
-            /* Marcador de destino final */
+            /* Marcador de destino final com alfinete vermelho e endereço com número */
+            .dest-pin-wrapper {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              transform: translate(-50%, -100%);
+              pointer-events: none;
+            }
+            .dest-title-pill {
+              background: #0F172A;
+              color: #FFFFFF;
+              font-size: 11px;
+              font-weight: 700;
+              padding: 4px 10px;
+              border-radius: 14px;
+              border: 1.5px solid #EF4444;
+              white-space: nowrap;
+              box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+              margin-bottom: 4px;
+              max-width: 240px;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              text-align: center;
+            }
             .dest-badge {
               background-color: #EF4444;
               border: 2px solid #FFFFFF;
               border-radius: 50%;
-              width: 24px;
-              height: 24px;
+              width: 28px;
+              height: 28px;
               display: flex;
               align-items: center;
               justify-content: center;
-              box-shadow: 0 4px 10px rgba(239, 68, 68, 0.6);
-              font-size: 12px;
+              box-shadow: 0 4px 12px rgba(239, 68, 68, 0.7);
+              font-size: 14px;
             }
 
             /* ========================================================= */
@@ -356,20 +379,22 @@ export function OSMMap({
               map.fitBounds(L.latLngBounds(rawCoords), { padding: [60, 60], maxZoom: 16 });
             };
 
-            // 3. Atualizar marcadores extras (Destino)
+            // 3. Atualizar marcadores extras (Destino com alfinete vermelho e número)
             window.updateMarkers = function(markersList) {
               markersGroup.clearLayers();
               if (!markersList || markersList.length === 0) return;
 
               markersList.forEach(function(m) {
                 if (m.type === 'destination') {
+                  var titleSafe = m.title ? m.title.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                  var pillHtml = titleSafe ? '<div class="dest-title-pill">📍 ' + titleSafe + '</div>' : '';
                   var destIcon = L.divIcon({
-                    className: 'dest-icon',
-                    html: '<div class="dest-badge">🏁</div>',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 12]
+                    className: 'dest-pin-container',
+                    html: '<div class="dest-pin-wrapper">' + pillHtml + '<div class="dest-badge">🏁</div></div>',
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0]
                   });
-                  var mk = L.marker([m.latitude, m.longitude], { icon: destIcon });
+                  var mk = L.marker([m.latitude, m.longitude], { icon: destIcon, zIndexOffset: 900 });
                   if (m.title) mk.bindPopup(m.title);
                   markersGroup.addLayer(mk);
                 }
