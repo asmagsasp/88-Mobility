@@ -99,6 +99,15 @@ export function HomeScreen() {
   // Rota e Carrinho 99
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<RouteCoordinate[]>([]);
+  const [onlineDrivers, setOnlineDrivers]       = useState<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    vehicle: string;
+    plate: string;
+    name: string;
+    lastSeen: number;
+  }[]>([]);
   const carSimInterval = useRef<any>(null);
 
   const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
@@ -364,11 +373,8 @@ export function HomeScreen() {
     }
   };
 
-  // Escuta respostas do motorista em tempo real durante a busca ou corrida ativa
+  // Sincronização em tempo real de motoristas online e ciclo de corrida
   useEffect(() => {
-    if (step !== 'searching' && step !== 'active') return;
-    if (!currentRideId) return;
-
     let isPolling = true;
 
     const interval = setInterval(async () => {
@@ -377,8 +383,39 @@ export function HomeScreen() {
         const { events, latestTime } = await pollRideEvents(lastPollTime.current);
         lastPollTime.current = latestTime;
 
+        // Remove motoristas inativos cujo sinal expirou há mais de 30 segundos
+        const now = Date.now();
+        setOnlineDrivers((prev) => prev.filter((d) => (now - d.lastSeen) <= 30000));
+
         for (const ev of events) {
-          if (ev.type === 'ACCEPT_RIDE' && ev.rideId === currentRideId) {
+          // 1. Atualização do status online/offline do motorista
+          if (ev.type === 'DRIVER_STATUS') {
+            if (ev.isOnline) {
+              setOnlineDrivers((prev) => {
+                const filtered = prev.filter((d) => d.id !== ev.driverId);
+                return [
+                  ...filtered,
+                  {
+                    id: ev.driverId,
+                    latitude: ev.latitude || coords.lat + 0.0035,
+                    longitude: ev.longitude || coords.lng + 0.0030,
+                    vehicle: ev.vehicle || 'Honda Fit',
+                    plate: ev.plate || 'BRA2E19',
+                    name: ev.name || 'Abel Magalhães',
+                    lastSeen: Date.now(),
+                  },
+                ];
+              });
+            } else {
+              setOnlineDrivers((prev) => prev.filter((d) => d.id !== ev.driverId));
+              if (!activeRide) {
+                setCarPosition(null);
+              }
+            }
+          }
+
+          // 2. Eventos da corrida em andamento
+          else if (ev.type === 'ACCEPT_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista aceitou a chamada!
             setActiveRide({
               id: currentRideId,
@@ -400,7 +437,7 @@ export function HomeScreen() {
             // Inicia o acompanhamento da rota e do carrinho até o passageiro
             loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude, vehicleName);
 
-          } else if (ev.type === 'DRIVER_LOCATION' && ev.rideId === currentRideId) {
+          } else if (ev.type === 'DRIVER_LOCATION' && currentRideId && ev.rideId === currentRideId) {
             // Posição em tempo real recebida do GPS do motorista com seu carro cadastrado
             const vehicleName = activeRide?.driverVehicle || 'Honda Fit';
             setCarPosition({
@@ -410,12 +447,12 @@ export function HomeScreen() {
               label: `Abel · ${vehicleName}`,
             });
 
-          } else if (ev.type === 'ARRIVED_PASSENGER' && ev.rideId === currentRideId) {
+          } else if (ev.type === 'ARRIVED_PASSENGER' && currentRideId && ev.rideId === currentRideId) {
             // Motorista chegou ao ponto de embarque
             setRideStatus('arrived');
             if (carSimInterval.current) clearInterval(carSimInterval.current);
 
-          } else if (ev.type === 'START_TRIP' && ev.rideId === currentRideId) {
+          } else if (ev.type === 'START_TRIP' && currentRideId && ev.rideId === currentRideId) {
             // Motorista iniciou a viagem até o destino
             setRideStatus('in_trip');
             if (destination) {
@@ -423,7 +460,7 @@ export function HomeScreen() {
               loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng, vehicleName);
             }
 
-          } else if (ev.type === 'DECLINE_RIDE' && ev.rideId === currentRideId) {
+          } else if (ev.type === 'DECLINE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             if (carSimInterval.current) clearInterval(carSimInterval.current);
             setStep('confirming');
             Alert.alert(
@@ -431,7 +468,7 @@ export function HomeScreen() {
               'O motorista Abel Magalhães não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
             );
 
-          } else if (ev.type === 'COMPLETE_RIDE' && ev.rideId === currentRideId) {
+          } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             if (carSimInterval.current) clearInterval(carSimInterval.current);
             // Motorista finalizou a corrida
             if (destination) {
@@ -462,9 +499,9 @@ export function HomeScreen() {
           }
         }
       } catch (err) {
-        console.warn('Erro ao escutar resposta do motorista:', err);
+        console.warn('Erro ao escutar eventos de corrida/motorista:', err);
       }
-    }, 1500);
+    }, (step === 'searching' || step === 'active') ? 1500 : 3500);
 
     return () => {
       isPolling = false;
@@ -611,13 +648,18 @@ export function HomeScreen() {
     }] : []),
   ];
 
-  // Posição padrão do carrinho caso não esteja em rota
-  const activeCar = carPosition || (step === 'active' || step === 'searching' ? {
-    latitude: initialDriverPos.latitude,
-    longitude: initialDriverPos.longitude,
+  // Exibe o carrinho no mapa APENAS se houver corrida ativa com motorista ou se houver motorista online
+  const activeCar = carPosition || (activeRide ? {
+    latitude: (onlineDrivers[0]?.latitude ?? initialDriverPos.latitude),
+    longitude: (onlineDrivers[0]?.longitude ?? initialDriverPos.longitude),
     heading: 45,
-    label: activeRide?.driverVehicle ? `Abel · ${activeRide.driverVehicle}` : 'Abel · Honda Fit',
-  } : null);
+    label: `${activeRide.driverName || 'Abel'} · ${activeRide.driverVehicle || 'Honda Fit'}`,
+  } : (onlineDrivers.length > 0 ? {
+    latitude: onlineDrivers[0].latitude,
+    longitude: onlineDrivers[0].longitude,
+    heading: 45,
+    label: `${onlineDrivers[0].name} · ${onlineDrivers[0].vehicle}`,
+  } : null));
 
   return (
     <View style={styles.container}>
@@ -631,6 +673,11 @@ export function HomeScreen() {
         routeCoordinates={routeCoordinates}
         isSearching={step === 'searching'}
         searchRadiusKm={10}
+        nearbyDrivers={onlineDrivers.map((d) => ({
+          latitude: d.latitude,
+          longitude: d.longitude,
+          title: `${d.name} (${d.vehicle})`,
+        }))}
       />
 
       {/* Indicador de carregamento de GPS */}
@@ -655,7 +702,9 @@ export function HomeScreen() {
           <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
             {step === 'active'
               ? (rideStatus === 'arrived' ? `🟢 ${activeRide?.driverVehicle || 'Honda Fit'} no local de embarque!` : `🟡 ${activeRide?.driverVehicle || 'Honda Fit'} a caminho`)
-              : `🟢 Motorista Abel Magalhães (${activeRide?.driverVehicle || 'Honda Fit'}) disponível perto`}
+              : (onlineDrivers.length > 0
+                  ? `🟢 Motorista ${onlineDrivers[0].name} (${onlineDrivers[0].vehicle}) online por perto`
+                  : `🔴 Nenhum motorista ativo no momento`)}
           </Text>
         </View>
         <TouchableOpacity onPress={logout} style={styles.logoutBtn}>

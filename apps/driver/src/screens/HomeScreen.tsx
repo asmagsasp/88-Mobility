@@ -52,6 +52,7 @@ export function HomeScreen() {
   const lastPollTime   = useRef<number>(Math.floor(Date.now() / 1000) - 60);
   const rejectedRideIds = useRef<Set<string>>(new Set());
   const slideAnim      = useRef(new Animated.Value(300)).current;
+  const lastHeartbeat  = useRef<number>(0);
 
   // Carrega ganhos reais do dia a partir do storage
   const loadTodayStats = async () => {
@@ -146,6 +147,21 @@ export function HomeScreen() {
     const interval = setInterval(async () => {
       if (!isOnline || !isPolling) return;
       try {
+        // Envia heartbeat do motorista a cada ~10 segundos para o app do passageiro
+        if (Date.now() - lastHeartbeat.current > 10000) {
+          lastHeartbeat.current = Date.now();
+          publishRideEvent({
+            type: 'DRIVER_STATUS',
+            driverId: driver?.id || 'abel-driver',
+            isOnline: true,
+            latitude: coords.lat,
+            longitude: coords.lng,
+            vehicle: driver?.vehicle || 'Honda Fit',
+            plate: driver?.vehiclePlate || 'BRA2E19',
+            name: driver?.name || 'Abel Magalhães',
+          });
+        }
+
         const { events, latestTime } = await pollRideEvents(lastPollTime.current);
         lastPollTime.current = latestTime;
 
@@ -179,6 +195,12 @@ export function HomeScreen() {
     return () => {
       isPolling = false;
       clearInterval(interval);
+      // Notifica os passageiros que o motorista ficou offline
+      publishRideEvent({
+        type: 'DRIVER_STATUS',
+        driverId: driver?.id || 'abel-driver',
+        isOnline: false,
+      });
     };
   }, [isOnline, rideRequest, activeRide]);
 
@@ -412,6 +434,19 @@ export function HomeScreen() {
 
   const toggleOnline = (val: boolean) => {
     setIsOnline(val);
+
+    // Transmite status em tempo real para os passageiros
+    publishRideEvent({
+      type: 'DRIVER_STATUS',
+      driverId: driver?.id || 'abel-driver',
+      isOnline: val,
+      latitude: coords.lat,
+      longitude: coords.lng,
+      vehicle: driver?.vehicle || 'Honda Fit',
+      plate: driver?.vehiclePlate || 'BRA2E19',
+      name: driver?.name || 'Abel Magalhães',
+    });
+
     if (!val) {
       stopNavigation();
       setRideRequest(null);

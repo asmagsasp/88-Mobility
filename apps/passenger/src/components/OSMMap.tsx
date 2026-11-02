@@ -31,6 +31,7 @@ interface OSMMapProps {
   routeCoordinates?: RouteCoordinate[];
   isSearching?: boolean;
   searchRadiusKm?: number;
+  nearbyDrivers?: { latitude: number; longitude: number; title?: string }[];
 }
 
 const CustomWebView = WebView as any;
@@ -51,6 +52,7 @@ export function OSMMap({
   routeCoordinates = [],
   isSearching = false,
   searchRadiusKm = 10,
+  nearbyDrivers = [],
 }: OSMMapProps) {
   const webViewRef = useRef<any>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -402,7 +404,7 @@ export function OSMMap({
             };
 
             // 4. Ativar/Desativar Radar Animado estilo 99 (até 10 km)
-            window.setSearchingRadar = function(isSearching, radiusKm) {
+            window.setSearchingRadar = function(isSearching, radiusKm, realDriversList) {
               var rKm = radiusKm || 10;
               var radiusMeters = rKm * 1000;
               var curCenter = userMarker ? userMarker.getLatLng() : L.latLng(${latitude}, ${longitude});
@@ -449,27 +451,21 @@ export function OSMMap({
                 radarPulseMarker.setLatLng(curCenter);
               }
 
-              // C. Mini carrinhos de motoristas parceiros pontilhados ao redor simulando escaneamento
+              // C. Exibe APENAS motoristas reais que estão online/ativos
               nearbyDriversGroup.clearLayers();
-              var driversNearby = [
-                { dLat: 0.007, dLng: 0.006, title: 'Motorista parceiro a 1.2 km' },
-                { dLat: -0.008, dLng: 0.007, title: 'Motorista parceiro a 2.3 km' },
-                { dLat: 0.012, dLng: -0.009, title: 'Motorista parceiro a 3.5 km' },
-                { dLat: -0.015, dLng: -0.012, title: 'Motorista parceiro a 5.1 km' },
-                { dLat: 0.022, dLng: 0.018, title: 'Motorista parceiro a 7.8 km' }
-              ];
-
-              driversNearby.forEach(function(d) {
-                var driverMiniIcon = L.divIcon({
-                  className: 'nearby-driver-wrap',
-                  html: '<div class="nearby-driver-pin">🚗</div>',
-                  iconSize: [24, 24],
-                  iconAnchor: [12, 12]
+              if (Array.isArray(realDriversList) && realDriversList.length > 0) {
+                realDriversList.forEach(function(d) {
+                  var driverMiniIcon = L.divIcon({
+                    className: 'nearby-driver-wrap',
+                    html: '<div class="nearby-driver-pin">🚗</div>',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                  });
+                  var dm = L.marker([d.latitude, d.longitude], { icon: driverMiniIcon, zIndexOffset: 800 });
+                  if (d.title) dm.bindPopup(d.title);
+                  nearbyDriversGroup.addLayer(dm);
                 });
-                var dm = L.marker([curCenter.lat + d.dLat, curCenter.lng + d.dLng], { icon: driverMiniIcon, zIndexOffset: 800 });
-                if (d.title) dm.bindPopup(d.title);
-                nearbyDriversGroup.addLayer(dm);
-              });
+              }
 
               // Centraliza e ajusta visão suavemente
               map.setView(curCenter, 14);
@@ -545,13 +541,13 @@ export function OSMMap({
     if (webViewRef.current) {
       const js = `
         if (window.setSearchingRadar) {
-          window.setSearchingRadar(${isSearching ? 'true' : 'false'}, ${searchRadiusKm || 10});
+          window.setSearchingRadar(${isSearching ? 'true' : 'false'}, ${searchRadiusKm || 10}, ${JSON.stringify(nearbyDrivers || [])});
         }
         true;
       `;
       webViewRef.current.injectJavaScript(js);
     }
-  }, [isSearching, searchRadiusKm, mapReady]);
+  }, [isSearching, searchRadiusKm, nearbyDrivers, mapReady]);
 
   // Atualiza a posição real do passageiro e recentraliza o mapa quando sem rota ativa
   useEffect(() => {

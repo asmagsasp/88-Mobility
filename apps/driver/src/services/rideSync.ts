@@ -34,7 +34,8 @@ export type RideSyncEvent =
   | { type: 'START_TRIP'; rideId: string }
   | { type: 'DECLINE_RIDE'; rideId: string }
   | { type: 'COMPLETE_RIDE'; rideId: string }
-  | { type: 'CANCEL_RIDE'; rideId: string };
+  | { type: 'CANCEL_RIDE'; rideId: string }
+  | { type: 'DRIVER_STATUS'; driverId: string; isOnline: boolean; latitude?: number; longitude?: number; vehicle?: string; plate?: string; name?: string };
 
 /**
  * Publica um evento no canal em tempo real e persiste no SQLite do Backend
