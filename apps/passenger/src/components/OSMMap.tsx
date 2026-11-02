@@ -29,14 +29,18 @@ interface OSMMapProps {
   markers?: MarkerItem[];
   carPosition?: CarPosition | null;
   routeCoordinates?: RouteCoordinate[];
+  isSearching?: boolean;
+  searchRadiusKm?: number;
 }
 
 const CustomWebView = WebView as any;
 
 /**
  * Componente de Mapa OpenStreetMap (Leaflet) via WebView no App do Passageiro.
- * Carrega a página Web UMA ÚNICA VEZ e atualiza a rota e o carrinho estilo 99
- * exclusivamente via injeção JavaScript. NUNCA recarrega nem pisca a tela.
+ * Inclui:
+ * - Círculo animado e ondas de radar estilo 99 para busca de motoristas em até 10 km
+ * - Carrinho animado estilo 99 se movendo suavemente pelo trajeto
+ * - 100% estável via injeção JavaScript, sem recarregar o WebView nem piscar a tela
  */
 export function OSMMap({
   latitude,
@@ -45,6 +49,8 @@ export function OSMMap({
   markers = [],
   carPosition,
   routeCoordinates = [],
+  isSearching = false,
+  searchRadiusKm = 10,
 }: OSMMapProps) {
   const webViewRef = useRef<any>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -88,13 +94,9 @@ export function OSMMap({
               height: 20px;
               border-radius: 50%;
               border: 3px solid #FFFFFF;
-              box-shadow: 0 0 12px rgba(16, 185, 129, 0.9);
-              animation: pulse-green 1.8s infinite;
-            }
-            @keyframes pulse-green {
-              0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.8); }
-              70% { transform: scale(1.1); box-shadow: 0 0 0 16px rgba(16, 185, 129, 0); }
-              100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+              box-shadow: 0 0 14px rgba(16, 185, 129, 0.9);
+              z-index: 100;
+              position: relative;
             }
 
             /* Carrinho 99 Top-Down */
@@ -142,6 +144,80 @@ export function OSMMap({
               box-shadow: 0 4px 10px rgba(239, 68, 68, 0.6);
               font-size: 12px;
             }
+
+            /* ========================================================= */
+            /* CÍRCULO E ONDAS DE RADAR ESTILO 99 (BUSCA ATÉ 10 KM)      */
+            /* ========================================================= */
+            .radar-container {
+              position: relative;
+              width: 260px;
+              height: 260px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              pointer-events: none;
+            }
+            .radar-ring {
+              position: absolute;
+              width: 100%;
+              height: 100%;
+              border-radius: 50%;
+              border: 2px solid rgba(245, 158, 11, 0.85);
+              background: radial-gradient(circle, rgba(245, 158, 11, 0.28) 0%, rgba(245, 158, 11, 0.08) 55%, transparent 100%);
+              animation: radar-expand 2.6s infinite cubic-bezier(0.1, 0.6, 0.4, 1);
+              box-shadow: 0 0 20px rgba(245, 158, 11, 0.45);
+            }
+            .radar-ring-1 { animation-delay: 0s; }
+            .radar-ring-2 { animation-delay: 0.85s; }
+            .radar-ring-3 { animation-delay: 1.7s; }
+
+            @keyframes radar-expand {
+              0% {
+                transform: scale(0.12);
+                opacity: 0.95;
+                border-width: 3.5px;
+              }
+              50% {
+                opacity: 0.65;
+              }
+              100% {
+                transform: scale(3.2);
+                opacity: 0;
+                border-width: 1px;
+              }
+            }
+
+            .radar-sonar-sweep {
+              position: absolute;
+              width: 160px;
+              height: 160px;
+              border-radius: 50%;
+              background: conic-gradient(from 0deg, rgba(245, 158, 11, 0.45) 0deg, rgba(245, 158, 11, 0.08) 60deg, transparent 90deg);
+              animation: radar-spin 3.2s linear infinite;
+            }
+            @keyframes radar-spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+
+            /* Mini carros parceiros ao redor sendo escaneados */
+            .nearby-driver-pin {
+              width: 24px;
+              height: 24px;
+              background-color: #0F172A;
+              border: 1.8px solid #F59E0B;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 11px;
+              box-shadow: 0 3px 10px rgba(0,0,0,0.6);
+              animation: driver-blip 1.6s infinite alternate ease-in-out;
+            }
+            @keyframes driver-blip {
+              0% { transform: scale(0.9); opacity: 0.65; }
+              100% { transform: scale(1.18); opacity: 1; filter: drop-shadow(0 0 7px #F59E0B); }
+            }
           </style>
         </head>
         <body>
@@ -162,6 +238,11 @@ export function OSMMap({
             var routeInner = null;
             var markersGroup = L.layerGroup().addTo(map);
 
+            // Variáveis do Radar de Busca (estilo 99)
+            var radarCircle = null;
+            var radarPulseMarker = null;
+            var nearbyDriversGroup = L.layerGroup().addTo(map);
+
             // Marcador Fixo do Passageiro (Você está aqui)
             var passengerIcon = L.divIcon({
               className: 'passenger-custom-pin',
@@ -169,7 +250,7 @@ export function OSMMap({
               iconSize: [20, 20],
               iconAnchor: [10, 10]
             });
-            L.marker([${latitude}, ${longitude}], { icon: passengerIcon }).addTo(map).bindPopup('Ponto de Embarque (Você)');
+            L.marker([${latitude}, ${longitude}], { icon: passengerIcon, zIndexOffset: 1000 }).addTo(map).bindPopup('Ponto de Embarque (Você)');
 
             // SVG do Carrinho do 99
             var carSvgHtml = \`
@@ -285,6 +366,75 @@ export function OSMMap({
               });
             };
 
+            // 4. Ativar/Desativar Radar Animado estilo 99 (até 10 km)
+            window.setSearchingRadar = function(isSearching, radiusKm) {
+              var rKm = radiusKm || 10;
+              var radiusMeters = rKm * 1000;
+
+              if (!isSearching) {
+                if (radarCircle) { map.removeLayer(radarCircle); radarCircle = null; }
+                if (radarPulseMarker) { map.removeLayer(radarPulseMarker); radarPulseMarker = null; }
+                nearbyDriversGroup.clearLayers();
+                return;
+              }
+
+              // A. Círculo geográfico no mapa com o raio exato de 10 km
+              if (!radarCircle) {
+                radarCircle = L.circle([${latitude}, ${longitude}], {
+                  radius: radiusMeters,
+                  color: '#F59E0B',
+                  weight: 2,
+                  dashArray: '8, 8',
+                  fillColor: '#F59E0B',
+                  fillOpacity: 0.08
+                }).addTo(map);
+              }
+
+              // B. Ondas de Radar e Sonar pulsante concêntrico (estilo 99)
+              if (!radarPulseMarker) {
+                var radarHtml = \`
+                  <div class="radar-container">
+                    <div class="radar-sonar-sweep"></div>
+                    <div class="radar-ring radar-ring-1"></div>
+                    <div class="radar-ring radar-ring-2"></div>
+                    <div class="radar-ring radar-ring-3"></div>
+                  </div>
+                \`;
+                var radarIcon = L.divIcon({
+                  className: 'radar-leaflet-icon',
+                  html: radarHtml,
+                  iconSize: [260, 260],
+                  iconAnchor: [130, 130]
+                });
+                radarPulseMarker = L.marker([${latitude}, ${longitude}], { icon: radarIcon, interactive: false, zIndexOffset: 500 }).addTo(map);
+              }
+
+              // C. Mini carrinhos de motoristas parceiros pontilhados ao redor simulando escaneamento
+              nearbyDriversGroup.clearLayers();
+              var driversNearby = [
+                { dLat: 0.007, dLng: 0.006, title: 'Motorista parceiro a 1.2 km' },
+                { dLat: -0.008, dLng: 0.007, title: 'Motorista parceiro a 2.3 km' },
+                { dLat: 0.012, dLng: -0.009, title: 'Motorista parceiro a 3.5 km' },
+                { dLat: -0.015, dLng: -0.012, title: 'Motorista parceiro a 5.1 km' },
+                { dLat: 0.022, dLng: 0.018, title: 'Motorista parceiro a 7.8 km' }
+              ];
+
+              driversNearby.forEach(function(d) {
+                var driverMiniIcon = L.divIcon({
+                  className: 'nearby-driver-wrap',
+                  html: '<div class="nearby-driver-pin">🚗</div>',
+                  iconSize: [24, 24],
+                  iconAnchor: [12, 12]
+                });
+                var dm = L.marker([${latitude} + d.dLat, ${longitude} + d.dLng], { icon: driverMiniIcon, zIndexOffset: 800 });
+                if (d.title) dm.bindPopup(d.title);
+                nearbyDriversGroup.addLayer(dm);
+              });
+
+              // Centraliza e ajusta visão suavemente
+              map.setView([${latitude}, ${longitude}], 14);
+            };
+
             // Avisa o React Native que o mapa Leaflet está pronto
             setTimeout(function() {
               if (window.ReactNativeWebView) {
@@ -349,6 +499,19 @@ export function OSMMap({
       webViewRef.current.injectJavaScript(js);
     }
   }, [markers, mapReady]);
+
+  // Atualiza o radar animado estilo 99 (busca de motoristas em até 10 km)
+  useEffect(() => {
+    if (webViewRef.current) {
+      const js = `
+        if (window.setSearchingRadar) {
+          window.setSearchingRadar(${isSearching ? 'true' : 'false'}, ${searchRadiusKm || 10});
+        }
+        true;
+      `;
+      webViewRef.current.injectJavaScript(js);
+    }
+  }, [isSearching, searchRadiusKm, mapReady]);
 
   return (
     <View style={styles.container}>

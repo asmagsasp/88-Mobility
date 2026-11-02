@@ -523,7 +523,7 @@ export function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Mapa 100% nativo OpenStreetMap com carrinho do 99 em movimento */}
+      {/* Mapa 100% nativo OpenStreetMap com carrinho do 99 e círculo animado de busca de 10 km */}
       <OSMMap
         latitude={coords.lat}
         longitude={coords.lng}
@@ -531,6 +531,8 @@ export function HomeScreen() {
         markers={mapMarkers}
         carPosition={activeCar}
         routeCoordinates={routeCoordinates}
+        isSearching={step === 'searching'}
+        searchRadiusKm={10}
       />
 
       {/* Indicador de carregamento de GPS */}
@@ -640,14 +642,20 @@ export function HomeScreen() {
         </View>
       )}
 
-      {/* Buscando motorista em tempo real */}
+      {/* Buscando motorista em tempo real com Radar estilo 99 */}
       {step === 'searching' && (
         <View style={[styles.searchingSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
-          <ActivityIndicator size="large" color={Colors.amber} style={{ marginBottom: 16 }} />
-          <Text style={[styles.searchingTitle, { color: colors.text }]}>Chamando Abel Magalhães...</Text>
+
+          <View style={styles.searchingRadarBadge}>
+            <Text style={styles.searchingRadarIcon}>📡</Text>
+            <Text style={styles.searchingRadarBadgeText}>RAIO DE BUSCA: ATÉ 10 KM</Text>
+          </View>
+
+          <ActivityIndicator size="large" color={Colors.amber} style={{ marginVertical: 14 }} />
+          <Text style={[styles.searchingTitle, { color: colors.text }]}>Buscando motoristas parceiros...</Text>
           <Text style={[styles.searchingSub, { color: colors.textSecondary }]}>
-            O pedido está tocando em tempo real no app do motorista. Aguarde a confirmação instantânea!
+            Escaneando motoristas ativos em um raio de até 10 km ao seu redor. Chamando Abel Magalhães em tempo real!
           </Text>
 
           <TouchableOpacity style={styles.cancelSearchBtn} onPress={cancelRide}>
@@ -1002,6 +1010,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 16,
     zIndex: 20,
+  },
+  searchingRadarBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginBottom: 6,
+  },
+  searchingRadarIcon: {
+    fontSize: 14,
+  },
+  searchingRadarBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#F59E0B',
+    letterSpacing: 0.5,
   },
   searchingTitle: {
     fontSize: 18,
