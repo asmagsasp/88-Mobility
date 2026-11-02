@@ -50,6 +50,27 @@ export function calculateBearing(
 }
 
 /**
+ * Calcula a distância em metros entre duas coordenadas geográficas via fórmula de Haversine
+ */
+export function calculateDistanceInMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000; // Raio da Terra em metros
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
  * Constrói texto humanizado em português brasileiro para a fala de voz TTS
  */
 function buildStepVoiceInstruction(
@@ -115,91 +136,99 @@ export async function fetchDrivingRoute(
   endLng: number,
   destinationLabel?: string
 ): Promise<RouteResult> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson&steps=true`;
+  const endpoints = [
+    `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson&steps=true`,
+    `https://routing.openstreetmap.de/routed-car/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson&steps=true`,
+  ];
 
-  try {
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if (!res.ok) {
-      throw new Error(`OSRM HTTP erro ${res.status}`);
-    }
-    const data = await res.json();
+  for (const url of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6500);
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json', 'User-Agent': '88Mobility-Driver/1.0' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    if (!data.routes || data.routes.length === 0) {
-      throw new Error('Nenhuma rota encontrada');
-    }
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data.routes || data.routes.length === 0) continue;
 
-    const route = data.routes[0];
-    const coords: RouteCoordinate[] = route.geometry.coordinates.map((c: [number, number]) => ({
-      latitude: c[1],
-      longitude: c[0],
-    }));
+      const route = data.routes[0];
+      const coords: RouteCoordinate[] = route.geometry.coordinates.map((c: [number, number]) => ({
+        latitude: c[1],
+        longitude: c[0],
+      }));
 
-    const rawSteps = route.legs?.[0]?.steps || [];
-    const steps: RouteStep[] = rawSteps.map((s: any, idx: number) => {
-      const isFirst = idx === 0;
-      const isLast = idx === rawSteps.length - 1;
-      const instruction = buildStepVoiceInstruction(s, isFirst, isLast, destinationLabel);
-      const streetName = s.name?.trim() || (isLast ? (destinationLabel || 'Destino') : 'Via principal');
+      const rawSteps = route.legs?.[0]?.steps || [];
+      const steps: RouteStep[] = rawSteps.map((s: any, idx: number) => {
+        const isFirst = idx === 0;
+        const isLast = idx === rawSteps.length - 1;
+        const instruction = buildStepVoiceInstruction(s, isFirst, isLast, destinationLabel);
+        const streetName = s.name?.trim() || (isLast ? (destinationLabel || 'Destino') : 'Via principal');
 
-      const locCoord = s.maneuver?.location
-        ? { latitude: s.maneuver.location[1], longitude: s.maneuver.location[0] }
-        : coords[0];
+        const locCoord = s.maneuver?.location
+          ? { latitude: s.maneuver.location[1], longitude: s.maneuver.location[0] }
+          : coords[0];
+
+        return {
+          streetName,
+          instruction,
+          distanceMeters: s.distance || 0,
+          durationSeconds: s.duration || 0,
+          maneuverType: s.maneuver?.type || 'turn',
+          maneuverModifier: s.maneuver?.modifier || 'straight',
+          location: locCoord,
+        };
+      });
 
       return {
-        streetName,
-        instruction,
-        distanceMeters: s.distance || 0,
-        durationSeconds: s.duration || 0,
-        maneuverType: s.maneuver?.type || 'turn',
-        maneuverModifier: s.maneuver?.modifier || 'straight',
-        location: locCoord,
+        coordinates: coords,
+        distanceMeters: route.distance || 0,
+        durationSeconds: route.duration || 0,
+        steps,
       };
-    });
-
-    return {
-      coordinates: coords,
-      distanceMeters: route.distance || 0,
-      durationSeconds: route.duration || 0,
-      steps,
-    };
-  } catch (err) {
-    console.warn('[RouteService] Fallback rota direta:', err);
-
-    // Fallback: Interpolação suave em linha reta caso a rede oscile
-    const stepsCount = 10;
-    const fallbackCoords: RouteCoordinate[] = [];
-    for (let i = 0; i <= stepsCount; i++) {
-      const t = i / stepsCount;
-      fallbackCoords.push({
-        latitude: startLat + (endLat - startLat) * t,
-        longitude: startLng + (endLng - startLng) * t,
-      });
+    } catch {
+      // Tenta próximo endpoint
     }
-
-    return {
-      coordinates: fallbackCoords,
-      distanceMeters: 1000,
-      durationSeconds: 180,
-      steps: [
-        {
-          streetName: 'Via de acesso',
-          instruction: 'Inicie o trajeto em direção ao passageiro.',
-          distanceMeters: 500,
-          durationSeconds: 90,
-          maneuverType: 'depart',
-          maneuverModifier: 'straight',
-          location: fallbackCoords[0],
-        },
-        {
-          streetName: destinationLabel || 'Local de embarque',
-          instruction: 'Você está se aproximando do local de embarque.',
-          distanceMeters: 500,
-          durationSeconds: 90,
-          maneuverType: 'arrive',
-          maneuverModifier: 'straight',
-          location: fallbackCoords[fallbackCoords.length - 1],
-        },
-      ],
-    };
   }
+
+  console.warn('[RouteService] Fallback rota direta');
+  // Fallback: Interpolação em linha reta caso todos os servidores estejam fora
+  const stepsCount = 10;
+  const fallbackCoords: RouteCoordinate[] = [];
+  for (let i = 0; i <= stepsCount; i++) {
+    const t = i / stepsCount;
+    fallbackCoords.push({
+      latitude: startLat + (endLat - startLat) * t,
+      longitude: startLng + (endLng - startLng) * t,
+    });
+  }
+
+  return {
+    coordinates: fallbackCoords,
+    distanceMeters: 1000,
+    durationSeconds: 180,
+    steps: [
+      {
+        streetName: 'Via de acesso',
+        instruction: 'Inicie o trajeto em direção ao passageiro.',
+        distanceMeters: 500,
+        durationSeconds: 90,
+        maneuverType: 'depart',
+        maneuverModifier: 'straight',
+        location: fallbackCoords[0],
+      },
+      {
+        streetName: destinationLabel || 'Local de embarque',
+        instruction: 'Você está se aproximando do local de embarque.',
+        distanceMeters: 500,
+        durationSeconds: 90,
+        maneuverType: 'arrive',
+        maneuverModifier: 'straight',
+        location: fallbackCoords[fallbackCoords.length - 1],
+      },
+    ],
+  };
 }

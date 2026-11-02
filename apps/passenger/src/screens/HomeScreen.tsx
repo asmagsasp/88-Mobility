@@ -20,6 +20,7 @@ import {
 import {
   fetchPassengerRoute,
   calculateBearing,
+  calculateDistanceInMeters,
 } from '../services/routeService';
 
 type Step = 'idle' | 'selecting_destination' | 'confirming' | 'searching' | 'active';
@@ -69,6 +70,7 @@ export function HomeScreen() {
 
   const [coords, setCoords]               = useState<{ lat: number; lng: number }>({ lat: -15.7942, lng: -47.8822 });
   const [gpsReady, setGpsReady]           = useState(false);
+  const [pickupAddress, setPickupAddress] = useState<string>('Sua localização atual');
   const [step, setStep]                   = useState<Step>('idle');
   const [search, setSearch]               = useState('');
   const [isSearchingAddress, setIsSearching] = useState(false);
@@ -108,7 +110,6 @@ export function HomeScreen() {
     name: string;
     lastSeen: number;
   }[]>([]);
-  const carSimInterval = useRef<any>(null);
 
   const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
 
@@ -145,11 +146,35 @@ export function HomeScreen() {
           return;
         }
 
+        // Função auxiliar para obter endereço de embarque atual
+        const fetchCurrentAddress = async (latitude: number, longitude: number) => {
+          try {
+            const revRes = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1`,
+              {
+                headers: {
+                  'User-Agent': '88Mobility-PassengerApp/1.0',
+                  'Accept-Language': 'pt-BR,pt;q=0.9',
+                },
+              }
+            );
+            if (revRes.ok) {
+              const revData = await revRes.json();
+              const road = revData.address?.road || revData.address?.pedestrian || revData.address?.suburb;
+              const num = revData.address?.house_number;
+              if (road) {
+                setPickupAddress(num ? `${road}, ${num}` : road);
+              }
+            }
+          } catch {}
+        };
+
         // 1. Obtém imediatamente a última localização conhecida do aparelho (sem atraso de satélite)
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (isMounted && lastKnown?.coords) {
           setCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude });
           setGpsReady(true);
+          fetchCurrentAddress(lastKnown.coords.latitude, lastKnown.coords.longitude);
         }
 
         // 2. Obtém a localização de alta precisão do GPS
@@ -157,11 +182,12 @@ export function HomeScreen() {
         if (isMounted && currentLoc?.coords) {
           setCoords({ lat: currentLoc.coords.latitude, lng: currentLoc.coords.longitude });
           setGpsReady(true);
+          fetchCurrentAddress(currentLoc.coords.latitude, currentLoc.coords.longitude);
         }
 
         // 3. Acompanha o deslocamento em tempo real continuamente
         locationSubscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
+          { accuracy: Location.Accuracy.High, distanceInterval: 3, timeInterval: 2000 },
           (loc) => {
             if (isMounted && loc?.coords) {
               setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
@@ -207,12 +233,13 @@ export function HomeScreen() {
             .trim();
         }
 
-        const viewboxParam = coords ? `&viewbox=${coords.lng - 0.4},${coords.lat + 0.4},${coords.lng + 0.4},${coords.lat - 0.4}&bounded=0` : '';
+        const viewboxLocal = coords ? `&viewbox=${coords.lng - 0.5},${coords.lat + 0.5},${coords.lng + 0.5},${coords.lat - 0.5}&bounded=1` : '';
+        const viewboxWide  = coords ? `&viewbox=${coords.lng - 2.5},${coords.lat + 2.5},${coords.lng + 2.5},${coords.lat - 2.5}&bounded=0` : '';
         let data: any[] = [];
 
-        // 1. Tenta buscar endereço com o texto original
+        // 1. Tenta buscar endereço com o texto original priorizando o raio local do passageiro
         try {
-          const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
+          const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxLocal}`;
           const res = await fetch(url, {
             headers: {
               'User-Agent': '88Mobility-PassengerApp/1.0',
@@ -224,10 +251,10 @@ export function HomeScreen() {
           }
         } catch {}
 
-        // 2. Se a busca com número não retornou resultados, busca pelo nome da rua e preserva o número digitado
+        // 2. Se a busca com número não retornou resultados locais, busca pelo nome da rua no raio local
         if ((!Array.isArray(data) || data.length === 0) && typedNumber && queryWithoutNumber.length >= 3) {
           try {
-            const fallbackUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber)}&format=json&addressdetails=1&limit=6&countrycodes=br${viewboxParam}`;
+            const fallbackUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxLocal}`;
             const fbRes = await fetch(fallbackUrl, {
               headers: {
                 'User-Agent': '88Mobility-PassengerApp/1.0',
@@ -240,7 +267,30 @@ export function HomeScreen() {
           } catch {}
         }
 
+        // 3. Se ainda não obteve resultado local, busca no estado / Brasil
+        if (!Array.isArray(data) || data.length === 0) {
+          try {
+            const wideUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber || trimmed)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxWide}`;
+            const wideRes = await fetch(wideUrl, {
+              headers: {
+                'User-Agent': '88Mobility-PassengerApp/1.0',
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+              },
+            });
+            if (wideRes.ok) {
+              data = await wideRes.json();
+            }
+          } catch {}
+        }
+
         if (Array.isArray(data) && data.length > 0) {
+          // Ordena as ruas encontradas por proximidade do GPS atual do usuário (a rua local mais próxima fica em 1º)
+          data.sort((a: any, b: any) => {
+            const distA = calculateDistanceInMeters(coords.lat, coords.lng, parseFloat(a.lat), parseFloat(a.lon));
+            const distB = calculateDistanceInMeters(coords.lat, coords.lng, parseFloat(b.lat), parseFloat(b.lon));
+            return distA - distB;
+          });
+
           const parsed: AddressSuggestion[] = data.map((item: any) => {
             const rawRoad = item.address?.road || item.address?.pedestrian || item.address?.suburb || item.display_name.split(',')[0].trim();
             // Pega o número retornado pela API ou preserva com exatidão o número digitado pelo passageiro
@@ -296,13 +346,13 @@ export function HomeScreen() {
   const totalAmount = kmAmount + SURGE_FEE + PLATFORM_FEE;
   const driverShare = totalAmount * 0.88;
 
-  // Carrega e anima o trajeto do motorista até o passageiro
-  const loadDriverRouteToPassenger = async (startLat: number, startLng: number, vehicleName: string = 'Honda Fit') => {
+  // Carrega o trajeto do motorista até o passageiro (desenha a rota no mapa sem timer falso)
+  const loadDriverRouteToPassenger = async (startLat: number, startLng: number, driverName: string = 'Motorista', vehicleName: string = 'Honda Fit') => {
     try {
       const route = await fetchPassengerRoute(startLat, startLng, coords.lat, coords.lng);
       setRouteCoordinates(route.coordinates);
 
-      const carLabel = `Abel · ${vehicleName}`;
+      const carLabel = `${driverName.split(' ')[0]} · ${vehicleName}`;
 
       if (route.coordinates.length > 0) {
         setCarPosition({
@@ -311,63 +361,17 @@ export function HomeScreen() {
           heading: 0,
           label: carLabel,
         });
-
-        // Simulação fluida de deslocamento do carrinho caso não cheguem pacotes contínuos
-        if (carSimInterval.current) clearInterval(carSimInterval.current);
-        let idx = 0;
-        const pts = route.coordinates;
-
-        carSimInterval.current = setInterval(() => {
-          if (idx >= pts.length - 1) {
-            if (carSimInterval.current) clearInterval(carSimInterval.current);
-            setRideStatus('arrived');
-            return;
-          }
-          idx++;
-          const cur = pts[idx];
-          const nxt = pts[Math.min(idx + 1, pts.length - 1)];
-          const heading = calculateBearing(cur.latitude, cur.longitude, nxt.latitude, nxt.longitude);
-
-          setCarPosition({
-            latitude: cur.latitude,
-            longitude: cur.longitude,
-            heading,
-            label: carLabel,
-          });
-        }, 1600);
       }
     } catch (e) {
       console.warn('Erro ao carregar trajeto do motorista no passageiro:', e);
     }
   };
 
-  // Carrega trajeto até o destino final quando a viagem inicia
-  const loadTripRouteToDestination = async (startLat: number, startLng: number, destLat: number, destLng: number, vehicleName: string = 'Honda Fit') => {
+  // Carrega trajeto até o destino final quando a viagem inicia (sem simulação falsa)
+  const loadTripRouteToDestination = async (startLat: number, startLng: number, destLat: number, destLng: number) => {
     try {
-      if (carSimInterval.current) clearInterval(carSimInterval.current);
       const route = await fetchPassengerRoute(startLat, startLng, destLat, destLng);
       setRouteCoordinates(route.coordinates);
-
-      const carLabel = `Abel · ${vehicleName}`;
-
-      let idx = 0;
-      const pts = route.coordinates;
-      carSimInterval.current = setInterval(() => {
-        if (idx >= pts.length - 1) {
-          if (carSimInterval.current) clearInterval(carSimInterval.current);
-          return;
-        }
-        idx++;
-        const cur = pts[idx];
-        const nxt = pts[Math.min(idx + 1, pts.length - 1)];
-        const heading = calculateBearing(cur.latitude, cur.longitude, nxt.latitude, nxt.longitude);
-        setCarPosition({
-          latitude: cur.latitude,
-          longitude: cur.longitude,
-          heading,
-          label: carLabel,
-        });
-      }, 1600);
     } catch (e) {
       console.warn('Erro ao carregar rota até destino:', e);
     }
@@ -401,7 +405,7 @@ export function HomeScreen() {
                     longitude: ev.longitude || coords.lng + 0.0030,
                     vehicle: ev.vehicle || 'Honda Fit',
                     plate: ev.plate || 'BRA2E19',
-                    name: ev.name || 'Abel Magalhães',
+                    name: ev.name || 'Motorista Parceiro',
                     lastSeen: Date.now(),
                   },
                 ];
@@ -417,70 +421,68 @@ export function HomeScreen() {
           // 2. Eventos da corrida em andamento
           else if (ev.type === 'ACCEPT_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista aceitou a chamada!
+            const dName = ev.driver?.name || 'Motorista Parceiro';
+            const vName = ev.driver?.vehicle || 'Honda Fit';
             setActiveRide({
               id: currentRideId,
-              driverName: ev.driver.name,
-              driverVehicle: ev.driver.vehicle,
-              driverPlate: ev.driver.plate,
-              driverRating: ev.driver.rating,
-              driverPhone: ev.driver.phone,
+              driverName: dName,
+              driverVehicle: vName,
+              driverPlate: ev.driver?.plate || 'BRA-8888',
+              driverRating: ev.driver?.rating || 5.0,
+              driverPhone: ev.driver?.phone || '',
               estimatedMinutes: 3,
               totalAmount,
               driverShare,
               platformShare: PLATFORM_FEE,
               status: 'arriving',
             });
-            const vehicleName = ev.driver.vehicle || 'Honda Fit';
             setRideStatus('arriving');
             setStep('active');
 
-            // Inicia o acompanhamento da rota e do carrinho até o passageiro
-            loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude, vehicleName);
+            // Inicia o acompanhamento da rota pelas ruas até o passageiro
+            loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude, dName, vName);
 
           } else if (ev.type === 'DRIVER_LOCATION' && currentRideId && ev.rideId === currentRideId) {
-            // Posição em tempo real recebida do GPS do motorista com seu carro cadastrado
-            const vehicleName = activeRide?.driverVehicle || 'Honda Fit';
+            // Posição em tempo real recebida do GPS FÍSICO real do motorista
+            const currentDriverName = activeRide?.driverName || ev.driverName || 'Motorista';
+            const vehicleName = activeRide?.driverVehicle || ev.vehicle || 'Honda Fit';
             setCarPosition({
               latitude: ev.latitude,
               longitude: ev.longitude,
-              heading: ev.heading,
-              label: `Abel · ${vehicleName}`,
+              heading: ev.heading || 0,
+              label: `${currentDriverName.split(' ')[0]} · ${vehicleName}`,
             });
 
           } else if (ev.type === 'ARRIVED_PASSENGER' && currentRideId && ev.rideId === currentRideId) {
             // Motorista chegou ao ponto de embarque
             setRideStatus('arrived');
-            if (carSimInterval.current) clearInterval(carSimInterval.current);
 
           } else if (ev.type === 'START_TRIP' && currentRideId && ev.rideId === currentRideId) {
             // Motorista iniciou a viagem até o destino
             setRideStatus('in_trip');
             if (destination) {
-              const vehicleName = activeRide?.driverVehicle || 'Honda Fit';
-              loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng, vehicleName);
+              loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng);
             }
 
           } else if (ev.type === 'DECLINE_RIDE' && currentRideId && ev.rideId === currentRideId) {
-            if (carSimInterval.current) clearInterval(carSimInterval.current);
             setStep('confirming');
             Alert.alert(
-              'Motorista Indisponível',
-              'O motorista Abel Magalhães não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
+              'Motorista Ocupado',
+              'O motorista não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
             );
 
           } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
-            if (carSimInterval.current) clearInterval(carSimInterval.current);
             // Motorista finalizou a corrida
             if (destination) {
               const historyItem: PassengerRideHistoryItem = {
                 id: currentRideId,
                 date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 timestamp: Date.now(),
-                origin: 'Sua localização',
+                origin: pickupAddress || 'Local de Embarque',
                 destination: destination.label,
                 km: distanceKm,
                 total: totalAmount,
-                driverName: activeRide?.driverName || 'Abel Magalhães',
+                driverName: activeRide?.driverName || 'Motorista Parceiro',
                 status: 'completed',
               };
               const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
@@ -488,7 +490,7 @@ export function HomeScreen() {
               list.unshift(historyItem);
               await AsyncStorage.setItem(PASSENGER_HISTORY_KEY, JSON.stringify(list));
             }
-            Alert.alert('Viagem Concluída! 🎉', `Corrida finalizada pelo motorista. Total: ${formatBRL(totalAmount)}`);
+            Alert.alert('Viagem Concluída! 🎉', `Corrida finalizada com sucesso. Total: ${formatBRL(totalAmount)}`);
             setActiveRide(null);
             setRouteCoordinates([]);
             setCarPosition(null);
@@ -507,7 +509,7 @@ export function HomeScreen() {
       isPolling = false;
       clearInterval(interval);
     };
-  }, [step, currentRideId, destination, distanceKm, totalAmount, driverShare, activeRide]);
+  }, [step, currentRideId, destination, distanceKm, totalAmount, driverShare, activeRide, pickupAddress]);
 
   const selectDestination = async (item: AddressSuggestion) => {
     Keyboard.dismiss();
@@ -539,7 +541,7 @@ export function HomeScreen() {
       origin: {
         latitude: coords.lat,
         longitude: coords.lng,
-        address: 'Sua localização atual',
+        address: pickupAddress || 'Local de Embarque',
       },
       destination: {
         latitude: destination.lat,
@@ -570,7 +572,6 @@ export function HomeScreen() {
 
   // Cancelar chamada
   const cancelRide = async () => {
-    if (carSimInterval.current) clearInterval(carSimInterval.current);
     if (currentRideId) {
       await publishRideEvent({
         type: 'CANCEL_RIDE',
@@ -586,7 +587,6 @@ export function HomeScreen() {
 
   // Concluir viagem pelo passageiro
   const completeRide = async () => {
-    if (carSimInterval.current) clearInterval(carSimInterval.current);
     Alert.alert('Finalizar Viagem', 'Deseja confirmar o desembarque e concluir a corrida?', [
       { text: 'Não', style: 'cancel' },
       {
@@ -597,11 +597,11 @@ export function HomeScreen() {
               id: currentRideId || `ride-${Date.now()}`,
               date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
               timestamp: Date.now(),
-              origin: 'Sua localização',
+              origin: pickupAddress || 'Local de Embarque',
               destination: destination.label,
               km: distanceKm,
               total: totalAmount,
-              driverName: activeRide?.driverName || 'Abel Magalhães',
+              driverName: activeRide?.driverName || 'Motorista Parceiro',
               status: 'completed',
             };
             const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
@@ -625,7 +625,7 @@ export function HomeScreen() {
   };
 
   const contactDriver = () => {
-    const driverName = activeRide?.driverName || 'Motorista Abel';
+    const driverName = activeRide?.driverName || 'Motorista';
     const rawPhone = (activeRide?.driverPhone || '11988888888').replace(/\D/g, '');
     Alert.alert(
       `Contato com ${driverName}`,
@@ -712,7 +712,7 @@ export function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Corrida ativa com Abel Magalhães */}
+      {/* Corrida ativa com motorista */}
       {step === 'active' && activeRide && (
         <View style={[styles.activeSheet, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
@@ -723,16 +723,16 @@ export function HomeScreen() {
             rideStatus === 'arrived' ? styles.statusBannerArrived : styles.statusBannerArriving,
           ]}>
             <Text style={styles.statusBannerText}>
-              {rideStatus === 'arriving' && `🚗 Acompanhando ${activeRide.driverVehicle || 'Honda Fit'} no mapa até seu local`}
-              {rideStatus === 'arrived' && `📍 Motorista chegou! Embarque no ${activeRide.driverVehicle || 'Honda Fit'} (${activeRide.driverPlate || 'BRA-8888'})`}
-              {rideStatus === 'in_trip' && `🚀 Viagem em andamento para seu destino no ${activeRide.driverVehicle || 'Honda Fit'}`}
+              {rideStatus === 'arriving' && `🚗 Acompanhando ${activeRide.driverVehicle || 'veículo'} no mapa até seu local`}
+              {rideStatus === 'arrived' && `📍 Motorista chegou! Embarque no ${activeRide.driverVehicle || 'veículo'} (${activeRide.driverPlate || 'BRA-8888'})`}
+              {rideStatus === 'in_trip' && `🚀 Viagem em andamento para seu destino no ${activeRide.driverVehicle || 'veículo'}`}
             </Text>
           </View>
 
-          {/* Card do Motorista Abel */}
+          {/* Card do Motorista Parceiro */}
           <View style={[styles.driverCard, { backgroundColor: colors.slate50, borderColor: colors.border }]}>
             <View style={styles.driverAvatar}>
-              <Text style={styles.driverAvatarText}>A</Text>
+              <Text style={styles.driverAvatarText}>{activeRide.driverName?.charAt(0) || 'M'}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -760,7 +760,7 @@ export function HomeScreen() {
 
           {/* Rota */}
           <View style={[styles.activeRoute, { backgroundColor: colors.slate50, borderColor: colors.border }]}>
-            <Text style={[styles.activeRouteText, { color: colors.text }]}>🟢 Seu ponto de encontro</Text>
+            <Text style={[styles.activeRouteText, { color: colors.text }]}>🟢 {pickupAddress || 'Local de Embarque'}</Text>
             <Text style={styles.activeRouteArrow}>↓ ({distanceKm} km estimados)</Text>
             <Text style={[styles.activeRouteText, { color: colors.text }]}>🏁 {destination?.label}</Text>
           </View>
@@ -769,7 +769,7 @@ export function HomeScreen() {
           <View style={styles.activeTotal}>
             <View>
               <Text style={[styles.activeTotalLabel, { color: colors.textSecondary }]}>Valor da Corrida</Text>
-              <Text style={styles.feeNotice}>88% vai direto para Abel ({formatBRL(driverShare)})</Text>
+              <Text style={styles.feeNotice}>88% repasse líquido ao motorista ({formatBRL(driverShare)})</Text>
             </View>
             <Text style={[styles.activeTotalValue, { color: colors.amber }]}>{formatBRL(totalAmount)}</Text>
           </View>
@@ -777,7 +777,7 @@ export function HomeScreen() {
           {/* Botões de Ação */}
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.contactBtn} onPress={contactDriver}>
-              <Text style={styles.contactBtnText}>📞 Falar com Abel</Text>
+              <Text style={styles.contactBtnText}>📞 Falar com {activeRide.driverName?.split(' ')[0] || 'Motorista'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.finishBtn} onPress={completeRide}>
               <Text style={styles.finishBtnText}>Concluir Viagem</Text>
@@ -802,7 +802,7 @@ export function HomeScreen() {
           <ActivityIndicator size="large" color={Colors.amber} style={{ marginVertical: 14 }} />
           <Text style={[styles.searchingTitle, { color: colors.text }]}>Buscando motoristas parceiros...</Text>
           <Text style={[styles.searchingSub, { color: colors.textSecondary }]}>
-            Escaneando motoristas ativos em um raio de até 10 km ao seu redor. Chamando Abel Magalhães em tempo real!
+            Escaneando motoristas ativos em um raio de até 10 km ao seu redor em tempo real.
           </Text>
 
           <TouchableOpacity style={styles.cancelSearchBtn} onPress={cancelRide}>
@@ -821,7 +821,7 @@ export function HomeScreen() {
             <View style={styles.routeRow}>
               <Text style={styles.routeDot}>🟢</Text>
               <Text style={[styles.routeText, { color: colors.text }]} numberOfLines={1}>
-                Sua localização atual
+                {pickupAddress || 'Sua localização atual'}
               </Text>
             </View>
             <View style={[styles.routeDivLine, { backgroundColor: colors.border }]} />
@@ -839,7 +839,7 @@ export function HomeScreen() {
               <Text style={[styles.priceVal, { color: colors.text }]}>{distanceKm} km</Text>
             </View>
             <View style={styles.priceRow}>
-              <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>Repasse ao Abel (88%)</Text>
+              <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>Repasse ao Motorista (88%)</Text>
               <Text style={[styles.priceVal, { color: Colors.success, fontWeight: '700' }]}>
                 {formatBRL(driverShare)}
               </Text>

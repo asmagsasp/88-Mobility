@@ -18,6 +18,7 @@ import {
 import {
   fetchDrivingRoute,
   calculateBearing,
+  calculateDistanceInMeters,
   type RouteStep,
 } from '../services/routeService';
 import { ttsService } from '../services/ttsService';
@@ -47,8 +48,22 @@ export function HomeScreen() {
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
   const [voiceEnabled, setVoiceEnabled]         = useState<boolean>(true);
 
-  // Intervalos de navegação e polling
-  const navIntervalRef = useRef<any>(null);
+  // Estado de navegação GPS real
+  interface ActiveNavState {
+    isActive: boolean;
+    phase: 'to_passenger' | 'to_destination';
+    targetLat: number;
+    targetLng: number;
+    destinationLabel: string;
+    rideId: string;
+    steps: RouteStep[];
+    currentStepIndex: number;
+    lastSpokenStepIndex: number;
+    destinationAnnounced: boolean;
+  }
+  const navStateRef = useRef<ActiveNavState | null>(null);
+
+  // Intervalos de polling e animação
   const lastPollTime   = useRef<number>(Math.floor(Date.now() / 1000) - 60);
   const rejectedRideIds = useRef<Set<string>>(new Set());
   const slideAnim      = useRef(new Animated.Value(300)).current;
@@ -77,7 +92,7 @@ export function HomeScreen() {
     loadTodayStats();
   }, [activeRide]);
 
-  // Solicita permissão e obtém localização real GPS com resposta imediata e acompanhamento contínuo
+  // Solicita permissão e rastreia continuamente a posição GPS REAL do motorista
   useEffect(() => {
     let isMounted = true;
     let locationSubscription: Location.LocationSubscription | null = null;
@@ -90,13 +105,21 @@ export function HomeScreen() {
           return;
         }
 
+        const driverFirstName = driver?.name?.split(' ')[0] || 'Motorista';
+        const driverVehicleName = driver?.vehicle || 'Honda Fit';
+
         // 1. Obtém imediatamente a última posição conhecida (resposta instantânea, sem atraso de satélite)
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (isMounted && lastKnown?.coords) {
           const lat = lastKnown.coords.latitude;
           const lng = lastKnown.coords.longitude;
           setCoords({ lat, lng });
-          setCarPosition({ latitude: lat, longitude: lng, heading: 0 });
+          setCarPosition({
+            latitude: lat,
+            longitude: lng,
+            heading: 0,
+            label: `${driverFirstName} · ${driverVehicleName}`,
+          });
           setGpsReady(true);
         }
 
@@ -106,20 +129,92 @@ export function HomeScreen() {
           const lat = currentLoc.coords.latitude;
           const lng = currentLoc.coords.longitude;
           setCoords({ lat, lng });
-          setCarPosition({ latitude: lat, longitude: lng, heading: 0 });
+          setCarPosition({
+            latitude: lat,
+            longitude: lng,
+            heading: 0,
+            label: `${driverFirstName} · ${driverVehicleName}`,
+          });
           setGpsReady(true);
         }
 
-        // 3. Acompanha o deslocamento real do motorista continuamente
+        // 3. Acompanha o deslocamento REAL do motorista continuamente (100% GPS físico)
         locationSubscription = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
+          { accuracy: Location.Accuracy.High, distanceInterval: 2, timeInterval: 1200 },
           (loc) => {
-            if (isMounted && loc?.coords) {
-              const lat = loc.coords.latitude;
-              const lng = loc.coords.longitude;
-              setCoords({ lat, lng });
-              if (!activeRide) {
-                setCarPosition({ latitude: lat, longitude: lng, heading: loc.coords.heading || 0 });
+            if (!isMounted || !loc?.coords) return;
+            const lat = loc.coords.latitude;
+            const lng = loc.coords.longitude;
+            const heading = loc.coords.heading || 0;
+
+            setCoords({ lat, lng });
+
+            const currentDriverFirst = driver?.name?.split(' ')[0] || 'Motorista';
+            const currentDriverVehicle = driver?.vehicle || 'Honda Fit';
+
+            // O carrinho no mapa do motorista segue 100% o seu GPS FÍSICO real
+            setCarPosition({
+              latitude: lat,
+              longitude: lng,
+              heading,
+              label: `${currentDriverFirst} · ${currentDriverVehicle}`,
+            });
+
+            // Envia posição real para o app do passageiro
+            if (isOnline) {
+              publishRideEvent({
+                type: 'DRIVER_LOCATION',
+                rideId: activeRide?.id,
+                driverId: driver?.id || 'abel-driver',
+                latitude: lat,
+                longitude: lng,
+                heading,
+              });
+            }
+
+            // Acompanhamento inteligente da rota e instruções passo a passo por voz
+            const nav = navStateRef.current;
+            if (nav && nav.isActive) {
+              const distToDest = calculateDistanceInMeters(lat, lng, nav.targetLat, nav.targetLng);
+
+              // 3.1. Verifica proximidade da próxima instrução de manobra / curva
+              if (nav.steps.length > 0 && nav.currentStepIndex < nav.steps.length) {
+                const nextStep = nav.steps[nav.currentStepIndex + 1];
+                if (nextStep) {
+                  const distToNext = calculateDistanceInMeters(
+                    lat,
+                    lng,
+                    nextStep.location.latitude,
+                    nextStep.location.longitude
+                  );
+                  // Narra instrução quando estiver entre 30 e 65 metros da curva
+                  if (distToNext <= 60 && nav.lastSpokenStepIndex <= nav.currentStepIndex) {
+                    nav.currentStepIndex++;
+                    nav.lastSpokenStepIndex = nav.currentStepIndex;
+                    setCurrentStepIndex(nav.currentStepIndex);
+                    if (voiceEnabled) {
+                      ttsService.speak(nextStep.instruction);
+                    }
+                  }
+                }
+              }
+
+              // 3.2. Chegada ao destino (SOMENTE se estiver fisicamente a menos de 35 metros!)
+              if (distToDest <= 35 && !nav.destinationAnnounced) {
+                nav.destinationAnnounced = true;
+                nav.isActive = false;
+
+                if (nav.phase === 'to_passenger') {
+                  setRidePhase('at_passenger');
+                  if (voiceEnabled) {
+                    ttsService.speak('Você chegou ao local de embarque do passageiro. Aguarde o embarque.');
+                  }
+                  publishRideEvent({ type: 'ARRIVED_PASSENGER', rideId: nav.rideId });
+                } else {
+                  if (voiceEnabled) {
+                    ttsService.speak('Você chegou ao destino final. Conclua a corrida quando o passageiro desembarcar.');
+                  }
+                }
               }
             }
           }
@@ -136,7 +231,7 @@ export function HomeScreen() {
         locationSubscription.remove();
       }
     };
-  }, [activeRide]);
+  }, [isOnline, activeRide, voiceEnabled, driver]);
 
   // Polling em tempo real para receber chamadas de passageiros quando estiver Online
   useEffect(() => {
@@ -206,9 +301,9 @@ export function HomeScreen() {
 
   // Limpa navegação ativa
   const stopNavigation = () => {
-    if (navIntervalRef.current) {
-      clearInterval(navIntervalRef.current);
-      navIntervalRef.current = null;
+    if (navStateRef.current) {
+      navStateRef.current.isActive = false;
+      navStateRef.current = null;
     }
     ttsService.stop();
     setRouteCoordinates([]);
@@ -230,7 +325,8 @@ export function HomeScreen() {
   };
 
   /**
-   * Inicia o acompanhamento da rota com o carrinho estilo 99 e a narração por voz TTS
+   * Inicia o acompanhamento da rota com o carrinho guiado 100% pelo GPS REAL
+   * e instruções de áudio TTS quando o carro se aproxima de cada curva física
    */
   const startNavigationTrack = async (
     startLat: number,
@@ -245,82 +341,34 @@ export function HomeScreen() {
     setRidePhase(phase);
 
     try {
-      // 1. Busca rota real pelas ruas via OSRM
+      // 1. Busca rota real pelas ruas via OSRM com espelho de contingência
       const route = await fetchDrivingRoute(startLat, startLng, endLat, endLng, targetLabel);
       setRouteCoordinates(route.coordinates);
       setRouteSteps(route.steps);
       setCurrentStepIndex(0);
 
-      // 2. Primeira instrução por voz TTS
-      if (route.steps.length > 0) {
+      // 2. Configura acompanhamento por GPS real (sem simulação de timer artificial!)
+      navStateRef.current = {
+        isActive: true,
+        phase,
+        targetLat: endLat,
+        targetLng: endLng,
+        destinationLabel: targetLabel,
+        rideId,
+        steps: route.steps,
+        currentStepIndex: 0,
+        lastSpokenStepIndex: 0,
+        destinationAnnounced: false,
+      };
+
+      // 3. Primeira instrução por voz TTS
+      if (route.steps.length > 0 && voiceEnabled) {
         const first = route.steps[0];
         const intro = phase === 'to_passenger'
           ? `Corrida aceita. A caminho do passageiro. ${first.instruction}`
-          : `Viagem iniciada. ${first.instruction}`;
+          : `Viagem iniciada em direção a ${targetLabel}. ${first.instruction}`;
         ttsService.speak(intro);
       }
-
-      // 3. Animação suave do carrinho ao longo do trajeto
-      const coordsList = route.coordinates;
-      let currentIndex = 0;
-      let stepIdx = 0;
-
-      navIntervalRef.current = setInterval(async () => {
-        if (currentIndex >= coordsList.length - 1) {
-          // Chegou ao fim deste trecho!
-          stopNavigation();
-
-          if (phase === 'to_passenger') {
-            setRidePhase('at_passenger');
-            ttsService.speak('Você chegou ao local de embarque do passageiro. Aguarde o embarque.');
-            await publishRideEvent({ type: 'ARRIVED_PASSENGER', rideId });
-          } else {
-            ttsService.speak('Você chegou ao destino final.');
-          }
-          return;
-        }
-
-        currentIndex++;
-        const currentPt = coordsList[currentIndex];
-        const nextPt = coordsList[Math.min(currentIndex + 1, coordsList.length - 1)];
-        const heading = calculateBearing(currentPt.latitude, currentPt.longitude, nextPt.latitude, nextPt.longitude);
-
-        const driverVehicleName = driver?.vehicle || 'Honda Fit';
-        const driverFirstName = driver?.name?.split(' ')[0] || 'Abel';
-
-        setCarPosition({
-          latitude: currentPt.latitude,
-          longitude: currentPt.longitude,
-          heading,
-          label: `${driverFirstName} · ${driverVehicleName}`,
-        });
-
-        // Envia posição em tempo real para o app do passageiro
-        publishRideEvent({
-          type: 'DRIVER_LOCATION',
-          rideId,
-          latitude: currentPt.latitude,
-          longitude: currentPt.longitude,
-          heading,
-        });
-
-        // Verifica se alcançou o próximo passo de manobra / rua
-        if (stepIdx < route.steps.length - 1) {
-          const nextStep = route.steps[stepIdx + 1];
-          const distToNextStep = Math.hypot(
-            currentPt.latitude - nextStep.location.latitude,
-            currentPt.longitude - nextStep.location.longitude
-          );
-
-          // Quando se aproxima da próxima esquina/rua
-          if (distToNextStep < 0.0007) {
-            stepIdx++;
-            setCurrentStepIndex(stepIdx);
-            ttsService.speak(nextStep.instruction);
-          }
-        }
-      }, 1400);
-
     } catch (err) {
       console.warn('Erro ao iniciar navegação de rota:', err);
     }
@@ -335,7 +383,7 @@ export function HomeScreen() {
       type: 'ACCEPT_RIDE',
       rideId: current.id,
       driver: {
-        name: driver?.name || 'Abel Magalhães',
+        name: driver?.name || 'Motorista Parceiro',
         vehicle: driver?.vehicle || 'Honda Fit',
         plate: driver?.vehiclePlate || 'BRA-8888',
         phone: driver?.phone || '(11) 98888-8888',
@@ -349,7 +397,7 @@ export function HomeScreen() {
       slideAnim.setValue(300);
     });
 
-    // Inicia trajeto até o ponto de embarque do passageiro
+    // Inicia trajeto a partir da posição GPS atual até o ponto de embarque do passageiro
     startNavigationTrack(
       coords.lat,
       coords.lng,
@@ -366,7 +414,9 @@ export function HomeScreen() {
     if (!activeRide) return;
     stopNavigation();
     setRidePhase('at_passenger');
-    ttsService.speak('Você chegou ao local de embarque do passageiro. Aguarde o passageiro.');
+    if (voiceEnabled) {
+      ttsService.speak('Você chegou ao local de embarque do passageiro. Aguarde o passageiro.');
+    }
     await publishRideEvent({ type: 'ARRIVED_PASSENGER', rideId: activeRide.id });
   };
 
@@ -375,9 +425,10 @@ export function HomeScreen() {
     if (!activeRide) return;
     await publishRideEvent({ type: 'START_TRIP', rideId: activeRide.id });
 
+    // Inicia trajeto a partir do GPS ATUAL do motorista até o destino final
     startNavigationTrack(
-      activeRide.origin.latitude,
-      activeRide.origin.longitude,
+      coords.lat,
+      coords.lng,
       activeRide.destination.latitude,
       activeRide.destination.longitude,
       'to_destination',
@@ -444,7 +495,7 @@ export function HomeScreen() {
       longitude: coords.lng,
       vehicle: driver?.vehicle || 'Honda Fit',
       plate: driver?.vehiclePlate || 'BRA2E19',
-      name: driver?.name || 'Abel Magalhães',
+      name: driver?.name || 'Motorista Parceiro',
     });
 
     if (!val) {
@@ -628,6 +679,21 @@ export function HomeScreen() {
         >
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Chamada de Corrida Disponível 🚀</Text>
+
+          {/* Identificação do Passageiro por Nome */}
+          <View style={{ backgroundColor: '#1E293B', padding: 12, borderRadius: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.amber, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A' }}>
+                {rideRequest.passengerName?.charAt(0) || 'P'}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: '500' }}>Passageiro(a)</Text>
+              <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>
+                {rideRequest.passengerName || 'Passageiro'}
+              </Text>
+            </View>
+          </View>
 
           <View style={styles.rideInfo}>
             <View style={styles.rideInfoRow}>

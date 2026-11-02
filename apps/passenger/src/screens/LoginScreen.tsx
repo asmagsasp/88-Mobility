@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
-  ActivityIndicator, Alert, Image,
+  ActivityIndicator, Alert, Image, ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,12 +12,20 @@ import { Spacing, Radius } from '../constants/theme';
 const REMEMBER_KEY = '88mobility_passenger_remember';
 
 /**
- * Tela de login do passageiro com suporte aos temas Claro e Escuro
- * e funcionalidade "Lembrar meus dados de acesso"
+ * Tela de login e cadastro do passageiro com identificação por Nome Completo,
+ * suporte aos temas Claro e Escuro e funcionalidade "Lembrar meus dados de acesso"
  */
 export function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const { login, isLoading } = useAuth();
+  const { login, registerPassenger, isLoading } = useAuth();
   const { colors, isDark } = useTheme();
+
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+
+  // Campos de cadastro
+  const [name, setName]         = useState('');
+  const [phone, setPhone]       = useState('');
+
+  // Campos comuns
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -31,6 +39,8 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
           const parsed = JSON.parse(saved);
           if (parsed.email) setEmail(parsed.email);
           if (parsed.password) setPassword(parsed.password);
+          if (parsed.name) setName(parsed.name);
+          if (parsed.phone) setPhone(parsed.phone);
           setRememberMe(true);
         }
       } catch (err) {
@@ -39,7 +49,16 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
     })();
   }, []);
 
-  const handleLogin = async () => {
+  const validatePassword = (pass: string) => {
+    const hasMinLength = pass.length >= 8;
+    const hasUpper = /[A-Z]/.test(pass);
+    const hasLower = /[a-z]/.test(pass);
+    const hasNumber = /[0-9]/.test(pass);
+    const hasSpecial = /[^A-Za-z0-9]/.test(pass);
+    return hasMinLength && hasUpper && hasLower && hasNumber && hasSpecial;
+  };
+
+  const handleAction = async () => {
     const trimmedEmail = email.trim();
     const trimmedPass = password.trim();
 
@@ -53,14 +72,7 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
       return;
     }
 
-    // Regra estrita de senha: mínimo 8 caracteres, maiúscula, minúscula, número e caractere especial
-    const hasMinLength = trimmedPass.length >= 8;
-    const hasUpper = /[A-Z]/.test(trimmedPass);
-    const hasLower = /[a-z]/.test(trimmedPass);
-    const hasNumber = /[0-9]/.test(trimmedPass);
-    const hasSpecial = /[^A-Za-z0-9]/.test(trimmedPass);
-
-    if (!hasMinLength || !hasUpper || !hasLower || !hasNumber || !hasSpecial) {
+    if (!validatePassword(trimmedPass)) {
       Alert.alert(
         'Senha Fraca ou Inválida',
         'A senha deve conter ao menos:\n• 8 caracteres\n• 1 letra maiúscula\n• 1 letra minúscula\n• 1 número\n• 1 caractere especial (!@#$%^&*)'
@@ -68,10 +80,29 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
       return;
     }
 
+    if (isRegisterMode) {
+      if (!name.trim()) {
+        Alert.alert('Nome Obrigatório', 'Por favor informe seu Nome Completo para identificação na corrida.');
+        return;
+      }
+      if (!phone.trim()) {
+        Alert.alert('Telefone Obrigatório', 'Por favor informe seu telefone celular / WhatsApp.');
+        return;
+      }
+    }
+
     // Salva ou remove credenciais com base na opção "Lembrar Senha"
     try {
       if (rememberMe) {
-        await AsyncStorage.setItem(REMEMBER_KEY, JSON.stringify({ email: trimmedEmail, password: trimmedPass }));
+        await AsyncStorage.setItem(
+          REMEMBER_KEY,
+          JSON.stringify({
+            email: trimmedEmail,
+            password: trimmedPass,
+            name: name.trim(),
+            phone: phone.trim(),
+          })
+        );
       } else {
         await AsyncStorage.removeItem(REMEMBER_KEY);
       }
@@ -80,19 +111,32 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
-      await login(trimmedEmail, trimmedPass);
+      if (isRegisterMode) {
+        await registerPassenger({
+          name: name.trim(),
+          phone: phone.trim(),
+          email: trimmedEmail,
+          password: trimmedPass,
+        });
+      } else {
+        await login(trimmedEmail, trimmedPass);
+      }
       onLogin();
-    } catch {
-      Alert.alert('Erro', 'Não foi possível fazer login');
+    } catch (err: any) {
+      Alert.alert('Erro', err?.message || 'Não foi possível realizar o acesso.');
     }
   };
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header com logo oficial */}
         <View style={[styles.header, { backgroundColor: isDark ? colors.cardSecondary : '#0F172A' }]}>
           <Image
@@ -101,16 +145,91 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
             resizeMode="contain"
           />
           <Text style={styles.appName}>88 Mobility</Text>
-          <Text style={styles.tagline}>Sua corrida, seu preço justo</Text>
+          <Text style={styles.tagline}>Passageiro · Sua corrida com preço justo</Text>
+        </View>
+
+        {/* Abas Entrar / Cadastrar-se */}
+        <View style={[styles.tabContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity
+            style={[
+              styles.tabBtn,
+              !isRegisterMode && { backgroundColor: colors.amber },
+            ]}
+            onPress={() => setIsRegisterMode(false)}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.tabBtnText,
+                { color: !isRegisterMode ? '#0F172A' : colors.textSecondary },
+                !isRegisterMode && { fontWeight: '700' },
+              ]}
+            >
+              Entrar
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tabBtn,
+              isRegisterMode && { backgroundColor: colors.amber },
+            ]}
+            onPress={() => setIsRegisterMode(true)}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.tabBtnText,
+                { color: isRegisterMode ? '#0F172A' : colors.textSecondary },
+                isRegisterMode && { fontWeight: '700' },
+              ]}
+            >
+              Cadastrar-se
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Formulário */}
         <View style={styles.form}>
-          <Text style={[styles.formTitle, { color: colors.text }]}>Bem-vindo de volta!</Text>
-          <Text style={[styles.formSubtitle, { color: colors.textSecondary }]}>Entre para solicitar sua corrida</Text>
+          <Text style={[styles.formTitle, { color: colors.text }]}>
+            {isRegisterMode ? 'Crie sua conta' : 'Bem-vindo de volta!'}
+          </Text>
+          <Text style={[styles.formSubtitle, { color: colors.textSecondary }]}>
+            {isRegisterMode
+              ? 'Identifique-se com seu nome real para os motoristas'
+              : 'Entre com seus dados para solicitar viagens'}
+          </Text>
+
+          {isRegisterMode && (
+            <>
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Nome Completo</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Ex: Maria Silva ou Abel Magalhães"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="words"
+                />
+              </View>
+
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>Telefone / WhatsApp</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="(11) 98888-8888"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="phone-pad"
+                />
+              </View>
+            </>
+          )}
 
           <View style={styles.fieldGroup}>
-            <Text style={[styles.label, { color: colors.textSecondary }]}>Email</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>E-mail</Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
               value={email}
@@ -156,63 +275,85 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
           <TouchableOpacity
             style={[styles.btn, { backgroundColor: colors.amber }, isLoading && styles.btnDisabled]}
-            onPress={handleLogin}
+            onPress={handleAction}
             disabled={isLoading}
             activeOpacity={0.85}
           >
             {isLoading
               ? <ActivityIndicator color="#0F172A" />
-              : <Text style={styles.btnText}>Entrar</Text>
+              : <Text style={styles.btnText}>{isRegisterMode ? 'Criar Conta de Passageiro 🚀' : 'Entrar'}</Text>
             }
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.registerBtn}>
+          <TouchableOpacity
+            style={styles.registerBtn}
+            onPress={() => setIsRegisterMode(!isRegisterMode)}
+          >
             <Text style={[styles.registerText, { color: colors.textSecondary }]}>
-              Não tem conta? <Text style={[styles.registerLink, { color: colors.amber }]}>Cadastre-se</Text>
+              {isRegisterMode ? 'Já possui cadastro? ' : 'Não tem conta? '}
+              <Text style={[styles.registerLink, { color: colors.amber }]}>
+                {isRegisterMode ? 'Fazer login' : 'Cadastre-se com seu Nome'}
+              </Text>
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content:   { flex: 1 },
   header: {
-    paddingTop: 80,
-    paddingBottom: 40,
+    paddingTop: 55,
+    paddingBottom: 25,
     alignItems: 'center',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
   },
   logoImage: {
-    width: 88,
-    height: 88,
-    borderRadius: 20,
-    marginBottom: 12,
+    width: 76,
+    height: 76,
+    borderRadius: 18,
+    marginBottom: 8,
   },
-  appName:   { fontSize: 22, fontWeight: '700', color: '#FFFFFF', marginTop: 4 },
+  appName:   { fontSize: 22, fontWeight: '700', color: '#FFFFFF', marginTop: 2 },
   tagline:   { fontSize: 13, color: '#94A3B8', marginTop: 4 },
-  form: {
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: Spacing.lg,
+    marginTop: 16,
+    padding: 4,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+  },
+  tabBtn: {
     flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: Radius.sm,
+  },
+  tabBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  form: {
     padding: Spacing.lg,
-    paddingTop: Spacing.xl,
+    paddingTop: Spacing.md,
   },
   formTitle:    { fontSize: 22, fontWeight: '700', marginBottom: 4 },
-  formSubtitle: { fontSize: 14, marginBottom: Spacing.lg },
-  fieldGroup:  { marginBottom: Spacing.md },
+  formSubtitle: { fontSize: 14, marginBottom: Spacing.md },
+  fieldGroup:  { marginBottom: Spacing.sm },
   label: {
     fontSize: 13,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   input: {
     borderWidth: 1,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.md,
-    paddingVertical: 12,
+    paddingVertical: 11,
     fontSize: 15,
     shadowColor: '#000',
     shadowOpacity: 0.04,
@@ -247,7 +388,7 @@ const styles = StyleSheet.create({
   },
   btn: {
     borderRadius: Radius.md,
-    paddingVertical: 15,
+    paddingVertical: 14,
     alignItems: 'center',
     marginTop: Spacing.sm,
     shadowColor: '#F59E0B',
@@ -258,7 +399,7 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.6 },
   btnText: { color: '#0F172A', fontSize: 16, fontWeight: '700' },
-  registerBtn: { marginTop: Spacing.lg, alignItems: 'center' },
+  registerBtn: { marginTop: Spacing.md, marginBottom: Spacing.xl, alignItems: 'center' },
   registerText: { fontSize: 14 },
   registerLink: { fontWeight: '700' },
 });
