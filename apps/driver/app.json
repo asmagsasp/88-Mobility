@@ -36,7 +36,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-location"
+      "expo-location",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O 88 Mobility precisa de acesso às suas fotos para upload da CNH e CRLV.",
+          "cameraPermission": "O 88 Mobility precisa de acesso à câmera para fotografar sua CNH e CRLV."
+        }
+      ]
     ],
     "extra": {
       "apiUrl": "http://localhost:3000/api"

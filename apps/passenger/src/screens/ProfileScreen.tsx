@@ -6,19 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 
 const PASSENGER_HISTORY_KEY = '@88mobility_passenger_history';
-
-const MENU_ITEMS = [
-  { icon: '💳', label: 'Formas de pagamento', sub: 'Cartão, Pix, dinheiro' },
-  { icon: '📍', label: 'Endereços salvos', sub: 'Casa, trabalho e favoritos' },
-  { icon: '🔔', label: 'Notificações', sub: 'Corridas, promoções e novidades' },
-  { icon: '⭐', label: 'Avaliações', sub: 'Veja o que os motoristas dizem' },
-  { icon: '❓', label: 'Ajuda e suporte', sub: 'Central de atendimento 88 Mobility' },
-];
+const PASSENGER_NOTIF_KEY = '@88mobility_passenger_notifications';
 
 export function ProfileScreen() {
   const { passenger, logout } = useAuth();
   const { isDark, toggleTheme, colors } = useTheme();
   const [realRidesCount, setRealRidesCount] = React.useState(0);
+  const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
 
   React.useEffect(() => {
     (async () => {
@@ -28,11 +22,24 @@ export function ProfileScreen() {
           const list = JSON.parse(stored);
           setRealRidesCount(list.length);
         }
+        const storedNotif = await AsyncStorage.getItem(PASSENGER_NOTIF_KEY);
+        if (storedNotif !== null) {
+          setNotificationsEnabled(JSON.parse(storedNotif));
+        }
       } catch (e) {
         console.warn('Erro ao carregar histórico no perfil:', e);
       }
     })();
   }, []);
+
+  const handleToggleNotifications = async (val: boolean) => {
+    setNotificationsEnabled(val);
+    try {
+      await AsyncStorage.setItem(PASSENGER_NOTIF_KEY, JSON.stringify(val));
+    } catch (e) {
+      console.warn('Erro ao salvar notificações:', e);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Sair do app?', '', [
@@ -77,26 +84,68 @@ export function ProfileScreen() {
 
         {/* Menu Geral */}
         <View style={[styles.menu, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {MENU_ITEMS.map((item, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[
-                styles.menuItem,
-                { borderBottomColor: colors.border },
-                i === MENU_ITEMS.length - 1 && { borderBottomWidth: 0 },
-              ]}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
-                <Text style={styles.menuIcon}>{item.icon}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.menuLabel, { color: colors.text }]}>{item.label}</Text>
-                <Text style={[styles.menuSub, { color: colors.textSecondary }]}>{item.sub}</Text>
-              </View>
-              <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
-            </TouchableOpacity>
-          ))}
+          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} activeOpacity={0.7}>
+            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
+              <Text style={styles.menuIcon}>💳</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Formas de pagamento</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Cartão, Pix, dinheiro</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} activeOpacity={0.7}>
+            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
+              <Text style={styles.menuIcon}>📍</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Endereços salvos</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Casa, trabalho e favoritos</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
+          </TouchableOpacity>
+
+          {/* Toggle de Notificações */}
+          <View style={[styles.menuItem, { borderBottomColor: colors.border }]}>
+            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
+              <Text style={styles.menuIcon}>🔔</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Notificações</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>
+                {notificationsEnabled ? '🟢 Alertas de corridas ativados' : '⚫ Notificações silenciadas'}
+              </Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={handleToggleNotifications}
+              trackColor={{ false: '#CBD5E1', true: colors.amberDark }}
+              thumbColor={notificationsEnabled ? colors.amber : '#F8FAFC'}
+            />
+          </View>
+
+          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} activeOpacity={0.7}>
+            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
+              <Text style={styles.menuIcon}>⭐</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Avaliações</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Veja o que os motoristas dizem</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} activeOpacity={0.7}>
+            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
+              <Text style={styles.menuIcon}>❓</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.menuLabel, { color: colors.text }]}>Ajuda e suporte</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Central de atendimento 88 Mobility</Text>
+            </View>
+            <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity
