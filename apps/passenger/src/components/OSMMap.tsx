@@ -253,9 +253,11 @@ export function OSMMap({
               attributionControl: true
             }).setView([${latitude}, ${longitude}], ${zoom});
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            // Camada visual estilo Google Maps (Carto Voyager com suporte a Retina)
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
               maxZoom: 19,
-              attribution: '© OpenStreetMap'
+              subdomains: 'abcd',
+              attribution: '© OpenStreetMap, © CARTO'
             }).addTo(map);
 
             var carMarker = null;
@@ -290,7 +292,7 @@ export function OSMMap({
             // SVG do Carrinho do 99
             var carSvgHtml = \`
               <div id="passenger-car-element" class="car-99-wrap" style="transform: rotate(0deg);">
-                <div id="driver-badge-text" class="driver-badge-top">Abel · 99</div>
+                <div id="driver-badge-text" class="driver-badge-top">Motorista</div>
                 <svg class="car-99-svg" viewBox="0 0 34 58" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <!-- Rodas Pretas -->
                   <rect x="1" y="9" width="3" height="9" rx="1.5" fill="#0F172A"/>
@@ -341,7 +343,7 @@ export function OSMMap({
             // 1. Atualizar posição e rotação do carrinho sem recarregar o mapa
             window.updatePassengerCar = function(newLat, newLng, heading, label) {
               if (!carMarker) {
-                carMarker = L.marker([newLat, newLng], { icon: carIcon }).addTo(map);
+                carMarker = L.marker([newLat, newLng], { icon: carIcon, zIndexOffset: 2000 }).addTo(map);
               } else {
                 carMarker.setLatLng([newLat, newLng]);
               }
@@ -355,24 +357,26 @@ export function OSMMap({
               }
             };
 
-            // 2. Atualizar rota (Polyline) sem recarregar o mapa
+            // 2. Traçado da rota estilo Google Maps (Azul Vivo com borda suave)
             window.updateRoute = function(rawCoords) {
               if (routeBorder) { map.removeLayer(routeBorder); routeBorder = null; }
               if (routeInner) { map.removeLayer(routeInner); routeInner = null; }
 
               if (!rawCoords || rawCoords.length < 2) return;
 
+              // Borda externa escura
               routeBorder = L.polyline(rawCoords, {
-                color: '#0F172A',
+                color: '#1E3A8A',
                 weight: 8,
-                opacity: 0.9,
+                opacity: 0.85,
                 lineCap: 'round',
                 lineJoin: 'round'
               }).addTo(map);
 
+              // Linha principal Azul Google Maps
               routeInner = L.polyline(rawCoords, {
-                color: '#F59E0B',
-                weight: 5,
+                color: '#3B82F6',
+                weight: 5.5,
                 opacity: 1,
                 lineCap: 'round',
                 lineJoin: 'round'

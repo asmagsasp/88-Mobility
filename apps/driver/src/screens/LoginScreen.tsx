@@ -19,6 +19,15 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [vehicleModel, setVehicleModel] = useState('');
   const [vehiclePlate, setVehiclePlate] = useState('');
 
+  // Formata e mascara telefone celular BR: (XX) XXXXX-XXXX
+  const formatPhone = (text: string) => {
+    const digits = text.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  };
+
   // Campos de login
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
@@ -150,13 +159,14 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
             <TextInput
               style={styles.input}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(text) => setPhone(formatPhone(text))}
               placeholder="(11) 99999-9999"
               placeholderTextColor={Colors.slate500}
               keyboardType="phone-pad"
               editable={!isLoginLoading}
-              autoComplete="tel"
+              autoComplete="off"
               textContentType="telephoneNumber"
+              importantForAutofill="no"
             />
 
             <Text style={[styles.label, { marginTop: Spacing.sm }]}>Modelo do Veículo</Text>

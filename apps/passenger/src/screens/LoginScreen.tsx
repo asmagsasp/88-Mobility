@@ -25,6 +25,14 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [name, setName]         = useState('');
   const [phone, setPhone]       = useState('');
 
+  const formatPhone = (text: string) => {
+    const digits = text.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  };
+
   // Campos comuns
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
@@ -219,10 +227,12 @@ export function LoginScreen({ onLogin }: { onLogin: () => void }) {
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(text) => setPhone(formatPhone(text))}
                   placeholder="(11) 98888-8888"
                   placeholderTextColor={colors.textMuted}
                   keyboardType="phone-pad"
+                  autoComplete="off"
+                  importantForAutofill="no"
                 />
               </View>
             </>

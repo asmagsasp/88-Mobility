@@ -28,7 +28,7 @@ export interface SyncRidePayload {
 
 export type RideSyncEvent =
   | { type: 'REQUEST_RIDE'; ride: SyncRidePayload }
-  | { type: 'ACCEPT_RIDE'; rideId: string; driver: { name: string; vehicle: string; plate: string; phone: string; rating: number } }
+  | { type: 'ACCEPT_RIDE'; rideId: string; driver: { name: string; vehicle: string; plate: string; phone: string; rating: number; latitude?: number; longitude?: number } }
   | { type: 'DRIVER_LOCATION'; rideId?: string; latitude: number; longitude: number; heading: number; driverId?: string; driverName?: string; vehicle?: string }
   | { type: 'ARRIVED_PASSENGER'; rideId: string }
   | { type: 'START_TRIP'; rideId: string }

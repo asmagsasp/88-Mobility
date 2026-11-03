@@ -113,12 +113,6 @@ export function HomeScreen() {
 
   const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
 
-  // Posição inicial estimada do motorista Abel Magalhães nas proximidades
-  const initialDriverPos = {
-    latitude: coords.lat + 0.0035,
-    longitude: coords.lng + 0.0030,
-  };
-
   // Carrega destinos recentes do passageiro
   useEffect(() => {
     (async () => {
@@ -233,11 +227,11 @@ export function HomeScreen() {
             .trim();
         }
 
-        const viewboxLocal = coords ? `&viewbox=${coords.lng - 0.5},${coords.lat + 0.5},${coords.lng + 0.5},${coords.lat - 0.5}&bounded=1` : '';
-        const viewboxWide  = coords ? `&viewbox=${coords.lng - 2.5},${coords.lat + 2.5},${coords.lng + 2.5},${coords.lat - 2.5}&bounded=0` : '';
+        // Viewbox suave para priorizar a região do passageiro sem restringir outros bairros/cidades
+        const viewboxLocal = coords ? `&viewbox=${coords.lng - 0.6},${coords.lat + 0.6},${coords.lng + 0.6},${coords.lat - 0.6}` : '';
         let data: any[] = [];
 
-        // 1. Tenta buscar endereço com o texto original priorizando o raio local do passageiro
+        // 1. Tenta buscar endereço com o texto original priorizando a proximidade do passageiro
         try {
           const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxLocal}`;
           const res = await fetch(url, {
@@ -251,7 +245,7 @@ export function HomeScreen() {
           }
         } catch {}
 
-        // 2. Se a busca com número não retornou resultados locais, busca pelo nome da rua no raio local
+        // 2. Se a busca com número não retornou resultados locais, busca pelo nome da via
         if ((!Array.isArray(data) || data.length === 0) && typedNumber && queryWithoutNumber.length >= 3) {
           try {
             const fallbackUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxLocal}`;
@@ -267,18 +261,34 @@ export function HomeScreen() {
           } catch {}
         }
 
-        // 3. Se ainda não obteve resultado local, busca no estado / Brasil
+        // 3. Fallback inteligente via Photon API (Komoot / OSM elástico com tolerância a erros e alta velocidade)
         if (!Array.isArray(data) || data.length === 0) {
           try {
-            const wideUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryWithoutNumber || trimmed)}&format=json&addressdetails=1&limit=8&countrycodes=br${viewboxWide}`;
-            const wideRes = await fetch(wideUrl, {
-              headers: {
-                'User-Agent': '88Mobility-PassengerApp/1.0',
-                'Accept-Language': 'pt-BR,pt;q=0.9',
-              },
-            });
-            if (wideRes.ok) {
-              data = await wideRes.json();
+            const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(trimmed)}&limit=8&lat=${coords.lat}&lon=${coords.lng}`;
+            const pRes = await fetch(photonUrl);
+            if (pRes.ok) {
+              const pData = await pRes.json();
+              if (pData.features && pData.features.length > 0) {
+                data = pData.features.map((f: any, idx: number) => {
+                  const p = f.properties;
+                  const name = p.name || p.street || trimmed;
+                  const num = p.housenumber || typedNumber;
+                  const road = num ? `${name}, ${num}` : name;
+                  return {
+                    place_id: `photon-${idx}-${Date.now()}`,
+                    lat: f.geometry.coordinates[1],
+                    lon: f.geometry.coordinates[0],
+                    display_name: [road, p.district, p.city, p.state].filter(Boolean).join(', '),
+                    address: {
+                      road: name,
+                      house_number: num,
+                      suburb: p.district || p.suburb,
+                      city: p.city,
+                      state: p.state,
+                    },
+                  };
+                });
+              }
             }
           } catch {}
         }
@@ -317,14 +327,14 @@ export function HomeScreen() {
           });
           setSuggestions(parsed);
         } else {
-          // Se não encontrou no OSM, oferece o endereço exato digitado pelo usuário (com o número)
+          // Se não encontrou, oferece busca direta
           setSuggestions([
             {
               id: `custom-${Date.now()}`,
               label: trimmed,
-              address: 'Endereço digitado pelo passageiro',
-              lat: coords.lat + 0.012,
-              lng: coords.lng + 0.012,
+              address: 'Local aproximado informado pelo passageiro',
+              lat: coords.lat,
+              lng: coords.lng,
             },
           ]);
         }
@@ -401,8 +411,8 @@ export function HomeScreen() {
                   ...filtered,
                   {
                     id: ev.driverId,
-                    latitude: ev.latitude || coords.lat + 0.0035,
-                    longitude: ev.longitude || coords.lng + 0.0030,
+                    latitude: ev.latitude || coords.lat,
+                    longitude: ev.longitude || coords.lng,
                     vehicle: ev.vehicle || 'Honda Fit',
                     plate: ev.plate || 'BRA2E19',
                     name: ev.name || 'Motorista Parceiro',
@@ -439,8 +449,10 @@ export function HomeScreen() {
             setRideStatus('arriving');
             setStep('active');
 
-            // Inicia o acompanhamento da rota pelas ruas até o passageiro
-            loadDriverRouteToPassenger(initialDriverPos.latitude, initialDriverPos.longitude, dName, vName);
+            // Inicia o acompanhamento da rota pelas ruas até o passageiro com a posição real do motorista
+            const startDriverLat = ev.driver?.latitude || coords.lat;
+            const startDriverLng = ev.driver?.longitude || coords.lng;
+            loadDriverRouteToPassenger(startDriverLat, startDriverLng, dName, vName);
 
           } else if (ev.type === 'DRIVER_LOCATION' && currentRideId && ev.rideId === currentRideId) {
             // Posição em tempo real recebida do GPS FÍSICO real do motorista
@@ -648,12 +660,12 @@ export function HomeScreen() {
     }] : []),
   ];
 
-  // Exibe o carrinho no mapa APENAS se houver corrida ativa com motorista ou se houver motorista online
-  const activeCar = carPosition || (activeRide ? {
-    latitude: (onlineDrivers[0]?.latitude ?? initialDriverPos.latitude),
-    longitude: (onlineDrivers[0]?.longitude ?? initialDriverPos.longitude),
+  // Exibe o carrinho no mapa APENAS se houver posição GPS real recebida ou se houver motorista online
+  const activeCar = carPosition || (activeRide && onlineDrivers.length > 0 ? {
+    latitude: onlineDrivers[0].latitude,
+    longitude: onlineDrivers[0].longitude,
     heading: 45,
-    label: `${activeRide.driverName || 'Abel'} · ${activeRide.driverVehicle || 'Honda Fit'}`,
+    label: `${activeRide.driverName || 'Motorista'} · ${activeRide.driverVehicle || 'Honda Fit'}`,
   } : (onlineDrivers.length > 0 ? {
     latitude: onlineDrivers[0].latitude,
     longitude: onlineDrivers[0].longitude,

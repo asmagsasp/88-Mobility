@@ -31,6 +31,61 @@ const formatBRL = (v: number) =>
 
 type RidePhase = 'idle' | 'to_passenger' | 'at_passenger' | 'to_destination';
 
+/**
+ * Calcula a menor distância perpendicular em metros de um ponto até um segmento de reta
+ */
+function distancePointToSegmentMeters(
+  px: number, py: number,
+  x1: number, y1: number,
+  x2: number, y2: number
+): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  if (dx === 0 && dy === 0) {
+    return calculateDistanceInMeters(px, py, x1, y1);
+  }
+  const cosLat = Math.cos((px * Math.PI) / 180);
+  const pxAdj = px;
+  const pyAdj = py * cosLat;
+  const x1Adj = x1;
+  const y1Adj = y1 * cosLat;
+  const x2Adj = x2;
+  const y2Adj = y2 * cosLat;
+
+  const segDx = x2Adj - x1Adj;
+  const segDy = y2Adj - y1Adj;
+  const segLenSq = segDx * segDx + segDy * segDy;
+
+  let t = ((pxAdj - x1Adj) * segDx + (pyAdj - y1Adj) * segDy) / segLenSq;
+  t = Math.max(0, Math.min(1, t));
+
+  const projX = x1 + t * (x2 - x1);
+  const projY = y1 + t * (y2 - y1);
+  return calculateDistanceInMeters(px, py, projX, projY);
+}
+
+/**
+ * Calcula a menor distância em metros do veículo até a linha da rota traçada
+ */
+function minDistanceToPolylineMeters(lat: number, lng: number, polyline: RouteCoordinate[]): number {
+  if (polyline.length === 0) return 999999;
+  if (polyline.length === 1) {
+    return calculateDistanceInMeters(lat, lng, polyline[0].latitude, polyline[0].longitude);
+  }
+  let minDist = 999999;
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const dist = distancePointToSegmentMeters(
+      lat, lng,
+      polyline[i].latitude, polyline[i].longitude,
+      polyline[i + 1].latitude, polyline[i + 1].longitude
+    );
+    if (dist < minDist) {
+      minDist = dist;
+    }
+  }
+  return minDist;
+}
+
 export function HomeScreen() {
   const { driver, logout } = useAuth();
   const [coords, setCoords]           = useState<{ lat: number; lng: number }>({ lat: -15.7942, lng: -47.8822 });
@@ -47,6 +102,11 @@ export function HomeScreen() {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
   const [voiceEnabled, setVoiceEnabled]         = useState<boolean>(true);
+
+  // Referência para polilinha atual e re-roteamento automático
+  const routeCoordinatesRef = useRef<RouteCoordinate[]>([]);
+  const isRecalculatingRef  = useRef<boolean>(false);
+  const offRouteCountRef    = useRef<number>(0);
 
   // Estado de navegação GPS real
   interface ActiveNavState {
@@ -91,6 +151,43 @@ export function HomeScreen() {
   useEffect(() => {
     loadTodayStats();
   }, [activeRide]);
+
+  // Recalculo automático de rota quando o motorista erra o percurso
+  const recalculateRoute = async (currentLat: number, currentLng: number, nav: ActiveNavState) => {
+    if (isRecalculatingRef.current) return;
+    isRecalculatingRef.current = true;
+
+    try {
+      if (voiceEnabled) {
+        ttsService.speak('Recalculando rota.');
+      }
+      const route = await fetchDrivingRoute(
+        currentLat,
+        currentLng,
+        nav.targetLat,
+        nav.targetLng,
+        nav.destinationLabel
+      );
+      if (route.coordinates && route.coordinates.length > 0) {
+        setRouteCoordinates(route.coordinates);
+        routeCoordinatesRef.current = route.coordinates;
+        setRouteSteps(route.steps);
+        setCurrentStepIndex(0);
+        nav.steps = route.steps;
+        nav.currentStepIndex = 0;
+        nav.lastSpokenStepIndex = 0;
+        if (route.steps.length > 0 && voiceEnabled) {
+          ttsService.speak(`Nova rota traçada. ${route.steps[0].instruction}`);
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao recalcular rota:', e);
+    } finally {
+      setTimeout(() => {
+        isRecalculatingRef.current = false;
+      }, 4000);
+    }
+  };
 
   // Solicita permissão e rastreia continuamente a posição GPS REAL do motorista
   useEffect(() => {
@@ -177,7 +274,21 @@ export function HomeScreen() {
             if (nav && nav.isActive) {
               const distToDest = calculateDistanceInMeters(lat, lng, nav.targetLat, nav.targetLng);
 
-              // 3.1. Verifica proximidade da próxima instrução de manobra / curva
+              // 3.1. Detecção automática de desvio de rota (re-roteamento dinâmico inteligente)
+              if (routeCoordinatesRef.current.length > 2 && !isRecalculatingRef.current && distToDest > 80) {
+                const offDist = minDistanceToPolylineMeters(lat, lng, routeCoordinatesRef.current);
+                if (offDist > 55) {
+                  offRouteCountRef.current += 1;
+                  if (offRouteCountRef.current >= 2) {
+                    offRouteCountRef.current = 0;
+                    recalculateRoute(lat, lng, nav);
+                  }
+                } else {
+                  offRouteCountRef.current = 0;
+                }
+              }
+
+              // 3.2. Verifica proximidade da próxima instrução de manobra / curva
               if (nav.steps.length > 0 && nav.currentStepIndex < nav.steps.length) {
                 const nextStep = nav.steps[nav.currentStepIndex + 1];
                 if (nextStep) {
@@ -199,7 +310,7 @@ export function HomeScreen() {
                 }
               }
 
-              // 3.2. Chegada ao destino (SOMENTE se estiver fisicamente a menos de 35 metros!)
+              // 3.3. Chegada ao destino (SOMENTE se estiver fisicamente a menos de 35 metros!)
               if (distToDest <= 35 && !nav.destinationAnnounced) {
                 nav.destinationAnnounced = true;
                 nav.isActive = false;
@@ -212,7 +323,7 @@ export function HomeScreen() {
                   publishRideEvent({ type: 'ARRIVED_PASSENGER', rideId: nav.rideId });
                 } else {
                   if (voiceEnabled) {
-                    ttsService.speak('Você chegou ao destino final. Conclua a corrida quando o passageiro desembarcar.');
+                    ttsService.speak('Você chegou ao destino final. Toque no botão verde para finalizar a corrida.');
                   }
                 }
               }
@@ -307,6 +418,8 @@ export function HomeScreen() {
     }
     ttsService.stop();
     setRouteCoordinates([]);
+    routeCoordinatesRef.current = [];
+    offRouteCountRef.current = 0;
     setRouteSteps([]);
     setCurrentStepIndex(0);
   };
@@ -344,6 +457,8 @@ export function HomeScreen() {
       // 1. Busca rota real pelas ruas via OSRM com espelho de contingência
       const route = await fetchDrivingRoute(startLat, startLng, endLat, endLng, targetLabel);
       setRouteCoordinates(route.coordinates);
+      routeCoordinatesRef.current = route.coordinates;
+      offRouteCountRef.current = 0;
       setRouteSteps(route.steps);
       setCurrentStepIndex(0);
 
@@ -388,6 +503,8 @@ export function HomeScreen() {
         plate: driver?.vehiclePlate || 'BRA-8888',
         phone: driver?.phone || '(11) 98888-8888',
         rating: driver?.rating || 5.0,
+        latitude: coords.lat,
+        longitude: coords.lng,
       },
     });
 
@@ -584,75 +701,28 @@ export function HomeScreen() {
         </View>
       )}
 
-      {/* Painel inferior de controle e status da corrida */}
-      <View style={styles.bottomPanel}>
-        {/* Toggle online */}
-        <View style={styles.onlineRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.onlineLabel}>
-              {isOnline ? '🟢 Online — aguardando chamadas' : '⚫ Offline — desconectado'}
-            </Text>
-            {isOnline && !activeRide && (
-              <Text style={styles.onlineSub}>Conectado em tempo real com passageiros da 88 Mobility</Text>
-            )}
-          </View>
-          <Switch
-            value={isOnline}
-            onValueChange={toggleOnline}
-            trackColor={{ false: Colors.darkBorder, true: Colors.success }}
-            thumbColor={Colors.white}
-          />
-        </View>
-
-        {/* Card de corrida ativa e suas fases */}
-        {activeRide && (
-          <View style={styles.activeRideCard}>
-            <View style={styles.activeRideHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.activeRidePhaseBadge}>
-                  {ridePhase === 'to_passenger' && '🟡 A CAMINHO DO PASSAGEIRO'}
-                  {ridePhase === 'at_passenger' && '🟢 NO LOCAL DE EMBARQUE'}
-                  {ridePhase === 'to_destination' && '🚀 VIAGEM EM ANDAMENTO'}
-                </Text>
-                <Text style={styles.activeRidePassenger}>
-                  Passageiro: {activeRide.passengerName || 'Passageiro'}
-                </Text>
-              </View>
-              <Text style={styles.activeRideEarning}>
-                {formatBRL(activeRide.driverShare)}
+      {/* Painel inferior quando NÃO está em corrida (online switch + ganhos) */}
+      {!activeRide && (
+        <View style={styles.bottomPanel}>
+          {/* Toggle online */}
+          <View style={styles.onlineRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.onlineLabel}>
+                {isOnline ? '🟢 Online — aguardando chamadas' : '⚫ Offline — desconectado'}
               </Text>
-            </View>
-
-            <Text style={styles.activeRideRoute}>
-              {ridePhase === 'to_passenger'
-                ? `Buscando em: ${activeRide.origin.address}`
-                : `Levando para: ${activeRide.destination.address}`}
-            </Text>
-
-            <View style={styles.activeActionButtons}>
-              {ridePhase === 'to_passenger' && (
-                <TouchableOpacity style={styles.arrivedBtn} onPress={confirmArrivedAtPassenger}>
-                  <Text style={styles.arrivedBtnText}>Já cheguei ao passageiro 📍</Text>
-                </TouchableOpacity>
-              )}
-
-              {ridePhase === 'at_passenger' && (
-                <TouchableOpacity style={styles.startTripBtn} onPress={startTripWithPassenger}>
-                  <Text style={styles.startTripBtnText}>Iniciar Viagem com Passageiro 🚀</Text>
-                </TouchableOpacity>
-              )}
-
-              {ridePhase === 'to_destination' && (
-                <TouchableOpacity style={styles.completeBtn} onPress={completeRide}>
-                  <Text style={styles.completeBtnText}>Finalizar Corrida ✅</Text>
-                </TouchableOpacity>
+              {isOnline && (
+                <Text style={styles.onlineSub}>Conectado em tempo real com passageiros da 88 Mobility</Text>
               )}
             </View>
+            <Switch
+              value={isOnline}
+              onValueChange={toggleOnline}
+              trackColor={{ false: Colors.darkBorder, true: Colors.success }}
+              thumbColor={Colors.white}
+            />
           </View>
-        )}
 
-        {/* Ganhos REAIS do dia */}
-        {!activeRide && (
+          {/* Ganhos REAIS do dia */}
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{formatBRL(completedToday.total)}</Text>
@@ -669,8 +739,67 @@ export function HomeScreen() {
               <Text style={styles.statLabel}>Avaliação</Text>
             </View>
           </View>
-        )}
-      </View>
+        </View>
+      )}
+
+      {/* Barra e Botão Flutuante durante corrida ativa (deixa o mapa 100% visível) */}
+      {activeRide && (
+        <View style={styles.floatingActionContainer}>
+          <View style={styles.floatingInfoPill}>
+            <View style={styles.floatingAvatarBadge}>
+              <Text style={styles.floatingAvatarText}>
+                {activeRide.passengerName?.charAt(0) || 'P'}
+              </Text>
+            </View>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.floatingPassengerName} numberOfLines={1}>
+                {activeRide.passengerName || 'Passageiro'}
+              </Text>
+              <Text style={styles.floatingTargetAddress} numberOfLines={1}>
+                {ridePhase === 'to_passenger'
+                  ? `Buscando: ${activeRide.origin.address}`
+                  : `Destino: ${activeRide.destination.address}`}
+              </Text>
+            </View>
+            <View style={styles.floatingEarningBadge}>
+              <Text style={styles.floatingEarningText}>
+                {formatBRL(activeRide.driverShare)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Botão de Ação Direta grande, acessível e visível */}
+          {ridePhase === 'to_passenger' && (
+            <TouchableOpacity
+              style={[styles.floatingActionBtn, { backgroundColor: '#F59E0B' }]}
+              onPress={confirmArrivedAtPassenger}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.floatingActionBtnText, { color: '#0F172A' }]}>📍 Já Cheguei ao Passageiro</Text>
+            </TouchableOpacity>
+          )}
+
+          {ridePhase === 'at_passenger' && (
+            <TouchableOpacity
+              style={[styles.floatingActionBtn, { backgroundColor: '#10B981' }]}
+              onPress={startTripWithPassenger}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.floatingActionBtnText}>🚀 Iniciar Viagem com Passageiro</Text>
+            </TouchableOpacity>
+          )}
+
+          {ridePhase === 'to_destination' && (
+            <TouchableOpacity
+              style={[styles.floatingActionBtn, { backgroundColor: '#10B981' }]}
+              onPress={completeRide}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.floatingActionBtnText}>✅ Finalizar Corrida</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Popup de nova corrida recebida do passageiro */}
       {rideRequest && (
@@ -861,6 +990,82 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#94A3B8',
     marginTop: 2,
+  },
+  floatingActionContainer: {
+    position: 'absolute',
+    bottom: 24,
+    left: 14,
+    right: 14,
+    zIndex: 999,
+    gap: 10,
+  },
+  floatingInfoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F172AE8',
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  floatingAvatarBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F59E0B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  floatingAvatarText: {
+    color: '#0F172A',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  floatingPassengerName: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  floatingTargetAddress: {
+    color: '#94A3B8',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  floatingEarningBadge: {
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
+  floatingEarningText: {
+    color: '#10B981',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  floatingActionBtn: {
+    paddingVertical: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  floatingActionBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
   activeRideCard: {
     marginTop: 8,
