@@ -253,11 +253,10 @@ export function OSMMap({
               attributionControl: true
             }).setView([${latitude}, ${longitude}], ${zoom});
 
-            // Camada visual estilo Google Maps (Carto Voyager com suporte a Retina)
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            // Camada de mapa OpenStreetMap 100% gratuita, estável e sem exigência de API Key
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
               maxZoom: 19,
-              subdomains: 'abcd',
-              attribution: '© OpenStreetMap, © CARTO'
+              attribution: '© OpenStreetMap contributors'
             }).addTo(map);
 
             var carMarker = null;
