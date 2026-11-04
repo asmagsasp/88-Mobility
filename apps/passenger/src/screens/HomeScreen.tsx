@@ -22,6 +22,12 @@ import {
   calculateBearing,
   calculateDistanceInMeters,
 } from '../services/routeService';
+import {
+  initNotificationService,
+  sendRideNotification,
+  startBackgroundKeepAlive,
+  stopBackgroundKeepAlive,
+} from '../services/notificationService';
 
 type Step = 'idle' | 'selecting_destination' | 'confirming' | 'searching' | 'active';
 type ActiveRideStatus = 'arriving' | 'arrived' | 'in_trip';
@@ -112,6 +118,11 @@ export function HomeScreen() {
   }[]>([]);
 
   const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
+
+  // Inicializa o serviço de notificações em segundo plano
+  useEffect(() => {
+    initNotificationService();
+  }, []);
 
   // Carrega destinos recentes do passageiro
   useEffect(() => {
@@ -449,6 +460,16 @@ export function HomeScreen() {
             setRideStatus('arriving');
             setStep('active');
 
+            // Notifica o passageiro sobreposta ao YouTube/outros apps e atualiza o serviço em segundo plano
+            sendRideNotification(
+              '🚗 Motorista a caminho!',
+              `${dName} aceitou sua corrida (${vName} · ${ev.driver?.plate || ''}). A caminho do embarque!`
+            );
+            startBackgroundKeepAlive(
+              '88 Mobility — Motorista a caminho',
+              `${dName} está vindo ao seu encontro (${vName} · ${ev.driver?.plate || ''})`
+            );
+
             // Inicia o acompanhamento da rota pelas ruas até o passageiro com a posição real do motorista
             const startDriverLat = ev.driver?.latitude || coords.lat;
             const startDriverLng = ev.driver?.longitude || coords.lng;
@@ -468,16 +489,37 @@ export function HomeScreen() {
           } else if (ev.type === 'ARRIVED_PASSENGER' && currentRideId && ev.rideId === currentRideId) {
             // Motorista chegou ao ponto de embarque
             setRideStatus('arrived');
+            sendRideNotification(
+              '📍 Seu motorista chegou!',
+              `${activeRide?.driverName || 'O motorista'} está aguardando você no local de embarque.`
+            );
+            startBackgroundKeepAlive(
+              '88 Mobility — Motorista no local',
+              'Seu motorista está aguardando você no local de embarque.'
+            );
 
           } else if (ev.type === 'START_TRIP' && currentRideId && ev.rideId === currentRideId) {
             // Motorista iniciou a viagem até o destino
             setRideStatus('in_trip');
+            sendRideNotification(
+              '🚀 Viagem Iniciada!',
+              `A caminho de: ${destination?.label || 'Destino'}`
+            );
+            startBackgroundKeepAlive(
+              '88 Mobility — Viagem em andamento',
+              `Levando você para: ${destination?.label || 'Destino'}`
+            );
             if (destination) {
               loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng);
             }
 
           } else if (ev.type === 'DECLINE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             setStep('confirming');
+            stopBackgroundKeepAlive();
+            sendRideNotification(
+              'Motorista Ocupado',
+              'O motorista não pôde aceitar esta chamada no momento. Tente novamente.'
+            );
             Alert.alert(
               'Motorista Ocupado',
               'O motorista não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
@@ -485,6 +527,11 @@ export function HomeScreen() {
 
           } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista finalizou a corrida
+            stopBackgroundKeepAlive();
+            sendRideNotification(
+              '🏁 Viagem Concluída!',
+              `Você chegou ao seu destino. Total pago: ${formatBRL(totalAmount)}.`
+            );
             if (destination) {
               const historyItem: PassengerRideHistoryItem = {
                 id: currentRideId,
@@ -547,6 +594,9 @@ export function HomeScreen() {
     setCurrentRideId(rideId);
     setStep('searching');
 
+    // Mantém a conexão ativa em segundo plano para o passageiro poder alternar para o YouTube ou outros apps
+    startBackgroundKeepAlive('88 Mobility', 'Procurando motoristas parceiros próximos para sua corrida...');
+
     const ridePayload: SyncRidePayload = {
       id: rideId,
       passengerName: passenger?.name || 'Passageiro',
@@ -584,6 +634,7 @@ export function HomeScreen() {
 
   // Cancelar chamada
   const cancelRide = async () => {
+    stopBackgroundKeepAlive();
     if (currentRideId) {
       await publishRideEvent({
         type: 'CANCEL_RIDE',

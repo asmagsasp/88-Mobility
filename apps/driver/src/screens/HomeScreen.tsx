@@ -22,6 +22,12 @@ import {
   type RouteStep,
 } from '../services/routeService';
 import { ttsService } from '../services/ttsService';
+import {
+  initNotificationService,
+  sendRideNotification,
+  startBackgroundKeepAlive,
+  stopBackgroundKeepAlive,
+} from '../services/notificationService';
 
 const { height } = Dimensions.get('window');
 const COMPLETED_RIDES_KEY = '@88mobility_driver_completed_rides';
@@ -149,6 +155,7 @@ export function HomeScreen() {
   };
 
   useEffect(() => {
+    initNotificationService();
     loadTodayStats();
   }, [activeRide]);
 
@@ -381,7 +388,15 @@ export function HomeScreen() {
             // Nova chamada recebida do passageiro!
             setRideRequest(requested);
             Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65 }).start();
+
+            // Notifica com alta prioridade para o motorista no Waze, WhatsApp ou YouTube
+            sendRideNotification(
+              `🚗 Nova Chamada! (${formatBRL(requested.driverShare)})`,
+              `Passageiro(a): ${requested.passengerName} • Buscar em: ${requested.origin.address}`,
+              { rideId: requested.id }
+            );
           } else if (ev.type === 'CANCEL_RIDE') {
+            sendRideNotification('Corrida Cancelada ⚠️', 'O passageiro cancelou a corrida.');
             if (rideRequest && rideRequest.id === ev.rideId) {
               dismissRequest();
               Alert.alert('Chamada Cancelada', 'O passageiro cancelou o pedido de corrida.');
@@ -514,6 +529,12 @@ export function HomeScreen() {
       slideAnim.setValue(300);
     });
 
+    // Mantém o app do motorista ativo em segundo plano (mesmo usando Waze ou WhatsApp)
+    startBackgroundKeepAlive(
+      '88 Mobility — A caminho do passageiro',
+      `Buscando ${current.passengerName} em: ${current.origin.address}`
+    );
+
     // Inicia trajeto a partir da posição GPS atual até o ponto de embarque do passageiro
     startNavigationTrack(
       coords.lat,
@@ -541,6 +562,11 @@ export function HomeScreen() {
   const startTripWithPassenger = async () => {
     if (!activeRide) return;
     await publishRideEvent({ type: 'START_TRIP', rideId: activeRide.id });
+
+    startBackgroundKeepAlive(
+      '88 Mobility — Viagem em andamento',
+      `Levando ${activeRide.passengerName} para: ${activeRide.destination.address}`
+    );
 
     // Inicia trajeto a partir do GPS ATUAL do motorista até o destino final
     startNavigationTrack(
@@ -595,6 +621,11 @@ export function HomeScreen() {
           setActiveRide(null);
           setRidePhase('idle');
           loadTodayStats();
+          if (isOnline) {
+            startBackgroundKeepAlive('88 Mobility — Motorista', 'Você está online e pronto para receber chamadas.');
+          } else {
+            stopBackgroundKeepAlive();
+          }
         },
       },
     ]);
@@ -602,6 +633,12 @@ export function HomeScreen() {
 
   const toggleOnline = (val: boolean) => {
     setIsOnline(val);
+
+    if (val) {
+      startBackgroundKeepAlive('88 Mobility — Motorista', 'Você está online e pronto para receber chamadas de passageiros.');
+    } else {
+      stopBackgroundKeepAlive();
+    }
 
     // Transmite status em tempo real para os passageiros
     publishRideEvent({
