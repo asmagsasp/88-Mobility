@@ -1,0 +1,5 @@
+backend/
+apps/
+apks/
+node_modules/
+.git/
