@@ -29,8 +29,10 @@ app.use(helmet());
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Permite requests sem origin (ex: mobile apps, Postman)
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Permite requests sem origin (mobile apps React Native, Postman, curl, webhooks)
+      // Ou se o wildcard '*' estiver presente no ALLOWED_ORIGINS
+      // Ou se a origin exata constar na lista
+      if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`Origin não permitida pelo CORS: ${origin}`));
@@ -38,7 +40,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
 

@@ -35,6 +35,8 @@ export type RideSyncEvent =
   | { type: 'DECLINE_RIDE'; rideId: string }
   | { type: 'COMPLETE_RIDE'; rideId: string }
   | { type: 'CANCEL_RIDE'; rideId: string }
+  | { type: 'PAYMENT_CONFIRMED'; rideId: string; status: string; captureMethod?: string; totalAmount?: number; driverAmount?: number; payout?: any; timestamp?: string }
+  | { type: 'DRIVER_PAYOUT_RECEIVED'; rideId: string; driverId: string; amount: number; pixKey: string; transactionId?: string; message?: string; timestamp?: string }
   | { type: 'DRIVER_STATUS'; driverId: string; isOnline: boolean; latitude?: number; longitude?: number; vehicle?: string; plate?: string; name?: string };
 
 /**

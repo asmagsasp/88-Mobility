@@ -15,7 +15,7 @@ import { JwtPayload, DriverLocation } from './shared/types';
 export function initSocket(httpServer: HttpServer): SocketServer {
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: allowedOrigins,
+      origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
     },

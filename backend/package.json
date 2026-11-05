@@ -5,13 +5,14 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "seed": "ts-node prisma/seed.ts",
+    "test:infinitepay": "ts-node test-infinitepay.ts",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {

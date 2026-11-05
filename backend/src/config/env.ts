@@ -33,6 +33,17 @@ const envSchema = z.object({
   // Mercado Pago (opcional em dev)
   MERCADO_PAGO_ACCESS_TOKEN: z.string().optional().default(''),
 
+  // Gateway InfinitePay (CloudWalk)
+  INFINITEPAY_API_KEY: z.string().optional().default(''),
+  INFINITEPAY_HANDLE: z.string().optional().default(''),
+  INFINITEPAY_BASE_URL: z.string().default('https://api.checkout.infinitepay.io'),
+
+  // URL pública do backend (para recepção de Webhooks da InfinitePay)
+  BACKEND_PUBLIC_URL: z.string().default('http://localhost:3000'),
+
+  // Provedor de Transferência Pix Automática (88% aos motoristas)
+  PIX_PAYOUT_PROVIDER: z.enum(['MOCK', 'MERCADO_PAGO', 'EFI', 'MANUAL']).default('MOCK'),
+
   // Admin padrão
   ADMIN_EMAIL: z.string().email().default('admin@88mobility.com'),
   ADMIN_PASSWORD_HASH: z.string().optional(),

@@ -527,20 +527,22 @@ export function HomeScreen() {
 
           } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista finalizou a corrida
+            const finishedRideId = currentRideId;
+            const finishedAmount = totalAmount;
             stopBackgroundKeepAlive();
             sendRideNotification(
               '🏁 Viagem Concluída!',
-              `Você chegou ao seu destino. Total pago: ${formatBRL(totalAmount)}.`
+              `Você chegou ao seu destino. Total a pagar: ${formatBRL(finishedAmount)}.`
             );
             if (destination) {
               const historyItem: PassengerRideHistoryItem = {
-                id: currentRideId,
+                id: finishedRideId,
                 date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 timestamp: Date.now(),
                 origin: pickupAddress || 'Local de Embarque',
                 destination: destination.label,
                 km: distanceKm,
-                total: totalAmount,
+                total: finishedAmount,
                 driverName: activeRide?.driverName || 'Motorista Parceiro',
                 status: 'completed',
               };
@@ -549,7 +551,19 @@ export function HomeScreen() {
               list.unshift(historyItem);
               await AsyncStorage.setItem(PASSENGER_HISTORY_KEY, JSON.stringify(list));
             }
-            Alert.alert('Viagem Concluída! 🎉', `Corrida finalizada com sucesso. Total: ${formatBRL(totalAmount)}`);
+
+            Alert.alert(
+              'Viagem Concluída! 🎉',
+              `Total da corrida: ${formatBRL(finishedAmount)}\n\n88% é repassado automaticamente para a chave PIX do motorista.\n\nDeseja pagar agora com InfinitePay (PIX ou Cartão)?`,
+              [
+                { text: 'Pagar Depois', style: 'cancel' },
+                {
+                  text: '⚡ Pagar com InfinitePay',
+                  onPress: () => openInfinitePayPayment(finishedRideId, finishedAmount),
+                },
+              ]
+            );
+
             setActiveRide(null);
             setRouteCoordinates([]);
             setCarPosition(null);
@@ -557,6 +571,16 @@ export function HomeScreen() {
             setDest(null);
             setSearch('');
             setCurrentRideId(null);
+
+          } else if (ev.type === 'PAYMENT_CONFIRMED') {
+            sendRideNotification(
+              '✅ Pagamento Confirmado!',
+              `Seu pagamento de ${formatBRL(totalAmount)} foi aprovado com sucesso na InfinitePay.`
+            );
+            Alert.alert(
+              'Pagamento Aprovado! 💳',
+              `Pagamento processado com sucesso na InfinitePay!\n\nO repasse de 88% já foi transferido para a chave PIX do motorista parceiro.`
+            );
           }
         }
       } catch (err) {
@@ -648,6 +672,23 @@ export function HomeScreen() {
     setStep('idle');
   };
 
+  // Abre tela de pagamento InfinitePay (PIX / Cartão com repasse automático de 88% ao motorista)
+  const openInfinitePayPayment = async (rideId: string, amount: number) => {
+    const backendUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+    const fallbackUrl = `${backendUrl.replace('/api', '')}/api/payments/infinitepay/demo-checkout?rideId=${rideId}`;
+    try {
+      const res = await fetch(`${backendUrl}/payments/infinitepay/checkout/${rideId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      const checkoutUrl = data?.data?.checkoutUrl || fallbackUrl;
+      await Linking.openURL(checkoutUrl);
+    } catch {
+      await Linking.openURL(fallbackUrl);
+    }
+  };
+
   // Concluir viagem pelo passageiro
   const completeRide = async () => {
     Alert.alert('Finalizar Viagem', 'Deseja confirmar o desembarque e concluir a corrida?', [
@@ -655,15 +696,18 @@ export function HomeScreen() {
       {
         text: 'Sim, Concluir',
         onPress: async () => {
+          const finishedRideId = currentRideId || `ride-${Date.now()}`;
+          const finishedAmount = totalAmount;
+
           if (destination) {
             const historyItem: PassengerRideHistoryItem = {
-              id: currentRideId || `ride-${Date.now()}`,
+              id: finishedRideId,
               date: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
               timestamp: Date.now(),
               origin: pickupAddress || 'Local de Embarque',
               destination: destination.label,
               km: distanceKm,
-              total: totalAmount,
+              total: finishedAmount,
               driverName: activeRide?.driverName || 'Motorista Parceiro',
               status: 'completed',
             };
@@ -675,6 +719,19 @@ export function HomeScreen() {
           if (currentRideId) {
             await publishRideEvent({ type: 'COMPLETE_RIDE', rideId: currentRideId });
           }
+
+          Alert.alert(
+            'Viagem Concluída! 🎉',
+            `Total: ${formatBRL(finishedAmount)}\n\n88% será repassado diretamente via PIX ao motorista parceiro.\n\nDeseja pagar agora com InfinitePay?`,
+            [
+              { text: 'Depois', style: 'cancel' },
+              {
+                text: '⚡ Pagar com InfinitePay',
+                onPress: () => openInfinitePayPayment(finishedRideId, finishedAmount),
+              },
+            ]
+          );
+
           setRouteCoordinates([]);
           setCarPosition(null);
           setActiveRide(null);

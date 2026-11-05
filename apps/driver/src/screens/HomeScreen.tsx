@@ -406,6 +406,21 @@ export function HomeScreen() {
               setRidePhase('idle');
               Alert.alert('Corrida Cancelada', 'O passageiro cancelou a corrida em andamento.');
             }
+          } else if (ev.type === 'DRIVER_PAYOUT_RECEIVED' || ev.type === 'PAYMENT_CONFIRMED') {
+            const amount =
+              ev.type === 'DRIVER_PAYOUT_RECEIVED'
+                ? ev.amount
+                : (ev.driverAmount || (ev.totalAmount ? ev.totalAmount * 0.88 : 0));
+            const txText = ev.type === 'DRIVER_PAYOUT_RECEIVED' && ev.transactionId ? `TxID: ${ev.transactionId}` : '';
+
+            sendRideNotification(
+              '💰 Repasse PIX Recebido (88%)!',
+              `Você recebeu R$ ${Number(amount).toFixed(2)} direto na sua chave PIX!`
+            );
+            Alert.alert(
+              'PIX Recebido! 💸',
+              `Pagamento aprovado na InfinitePay!\n\nRepasse de 88% no valor de R$ ${Number(amount).toFixed(2)} transferido com sucesso para sua chave PIX.\n${txText}`
+            );
           }
         }
       } catch (pollErr) {
