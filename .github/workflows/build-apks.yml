@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   # ============================================================
   # 1. Build APK do Passageiro
@@ -35,13 +38,26 @@ jobs:
         working-directory: apps/passenger
         run: npm ci
 
+      - name: Criar .env de Produção para o Passageiro
+        working-directory: apps/passenger
+        run: |
+          echo "EXPO_PUBLIC_API_URL=https://dimmer-grass-alright.ngrok-free.dev/api" > .env
+          echo "EXPO_PUBLIC_SOCKET_URL=https://dimmer-grass-alright.ngrok-free.dev" >> .env
+          cat .env
+
       - name: Prebuild Android (Expo)
         working-directory: apps/passenger
         run: npx expo prebuild --platform android --clean
+        env:
+          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
+          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
 
       - name: Compilar APK (Release)
         working-directory: apps/passenger/android
         run: ./gradlew assembleRelease --no-daemon
+        env:
+          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
+          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
 
       - name: Upload APK do Passageiro como Artefato
         uses: actions/upload-artifact@v4
@@ -79,13 +95,26 @@ jobs:
         working-directory: apps/driver
         run: npm ci
 
+      - name: Criar .env de Produção para o Motorista
+        working-directory: apps/driver
+        run: |
+          echo "EXPO_PUBLIC_API_URL=https://dimmer-grass-alright.ngrok-free.dev/api" > .env
+          echo "EXPO_PUBLIC_SOCKET_URL=https://dimmer-grass-alright.ngrok-free.dev" >> .env
+          cat .env
+
       - name: Prebuild Android (Expo)
         working-directory: apps/driver
         run: npx expo prebuild --platform android --clean
+        env:
+          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
+          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
 
       - name: Compilar APK (Release)
         working-directory: apps/driver/android
         run: ./gradlew assembleRelease --no-daemon
+        env:
+          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
+          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
 
       - name: Upload APK do Motorista como Artefato
         uses: actions/upload-artifact@v4
@@ -93,3 +122,50 @@ jobs:
           name: 88-Mobility-Motorista-APK
           path: apps/driver/android/app/build/outputs/apk/release/*.apk
           retention-days: 14
+
+  # ============================================================
+  # 3. Publicar Release com Links Diretos de Download dos APKs
+  # ============================================================
+  publish-release:
+    name: Publicar Release dos APKs
+    needs: [build-passenger, build-driver]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar APK do Passageiro
+        uses: actions/download-artifact@v4
+        with:
+          name: 88-Mobility-Passageiro-APK
+          path: apks-passenger
+
+      - name: Baixar APK do Motorista
+        uses: actions/download-artifact@v4
+        with:
+          name: 88-Mobility-Motorista-APK
+          path: apks-driver
+
+      - name: Preparar arquivos APK
+        run: |
+          mkdir -p final-apks
+          find apks-passenger -name "*.apk" -exec cp {} final-apks/88-Mobility-Passageiro.apk \;
+          find apks-driver -name "*.apk" -exec cp {} final-apks/88-Mobility-Motorista.apk \;
+          ls -la final-apks/
+
+      - name: Criar ou Atualizar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-production
+          name: "88 Mobility — APKs de Produção v1.0.0"
+          body: |
+            ## 🚀 88 Mobility — APKs Oficiais de Produção
+            Aplicativos compilados para Android com integração oficial de pagamentos InfinitePay e repasse PIX automático de 88% aos motoristas parceiros.
+
+            ### 📲 Downloads Diretos para o Celular:
+            - 🟢 **[Baixar APK Passageiro](https://github.com/asmagsasp/88-Mobility/releases/download/v1.0.0-production/88-Mobility-Passageiro.apk)**
+            - 🟡 **[Baixar APK Motorista](https://github.com/asmagsasp/88-Mobility/releases/download/v1.0.0-production/88-Mobility-Motorista.apk)**
+          files: |
+            final-apks/88-Mobility-Passageiro.apk
+            final-apks/88-Mobility-Motorista.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
