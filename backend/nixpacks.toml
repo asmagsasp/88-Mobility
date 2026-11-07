@@ -1,0 +1,14 @@
+# Arquivo gerado automaticamente pelo Nixpacks (Railway)
+# Instrui o Railway a instalar dependências e compilar o TypeScript
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm run start:prod"
