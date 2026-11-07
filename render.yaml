@@ -1,0 +1,86 @@
+# =============================================================
+# Render.com Blueprint — 88 Mobility Backend
+# Docs: https://render.com/docs/blueprint-spec
+# =============================================================
+
+services:
+  - type: web
+    name: 88mobility-backend
+    runtime: node
+    rootDir: backend
+    region: oregon          # Troque para "frankfurt" se quiser mais proximo do Brasil
+
+    # ---------------------------------------------------------
+    # Build
+    # ---------------------------------------------------------
+    buildCommand: npm install && npm run build
+
+    # ---------------------------------------------------------
+    # Start
+    # ---------------------------------------------------------
+    # Roda db push (cria tabelas) e depois sobe o servidor
+    startCommand: npm run start:prod
+
+    # ---------------------------------------------------------
+    # Plano gratuito do Render
+    # (servico "dorme" apos 15min sem requests — para prod real use "starter")
+    # ---------------------------------------------------------
+    plan: free
+
+    # ---------------------------------------------------------
+    # Health check — Render reinicia automaticamente se falhar
+    # ---------------------------------------------------------
+    healthCheckPath: /health
+
+    # ---------------------------------------------------------
+    # Variáveis de ambiente
+    # Valores sensiveis (JWT_SECRET, INFINITEPAY_API_KEY, etc.)
+    # devem ser preenchidos no painel do Render (nao no arquivo)
+    # ---------------------------------------------------------
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 3000
+
+      # Banco SQLite local — Render tem disco efemero no plano free
+      # (dados resetam a cada deploy; migre para PostgreSQL para persistencia)
+      - key: DATABASE_URL
+        value: file:/tmp/88mobility.db
+
+      # Redis — sem Redis externo, usa modo em memoria
+      - key: REDIS_URL
+        value: ""
+
+      # CORS — permite qualquer origem (apps mobile)
+      - key: ALLOWED_ORIGINS
+        value: "*"
+
+      # Repasse PIX (MOCK por padrao — sem transferencia real)
+      - key: PIX_PAYOUT_PROVIDER
+        value: MOCK
+
+      # InfinitePay
+      - key: INFINITEPAY_BASE_URL
+        value: https://api.checkout.infinitepay.io
+
+      # Segredos — PREENCHER NO PAINEL DO RENDER (nao aqui)
+      - key: JWT_SECRET
+        sync: false           # Render vai pedir no painel
+
+      - key: JWT_REFRESH_SECRET
+        sync: false
+
+      - key: INFINITEPAY_API_KEY
+        sync: false
+
+      - key: INFINITEPAY_HANDLE
+        sync: false
+
+      # URL publica do proprio servico (preenchida automaticamente pelo Render)
+      - key: BACKEND_PUBLIC_URL
+        fromService:
+          type: web
+          name: 88mobility-backend
+          property: host
