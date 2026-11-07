@@ -41,23 +41,23 @@ jobs:
       - name: Criar .env de Produção para o Passageiro
         working-directory: apps/passenger
         run: |
-          echo "EXPO_PUBLIC_API_URL=https://dimmer-grass-alright.ngrok-free.dev/api" > .env
-          echo "EXPO_PUBLIC_SOCKET_URL=https://dimmer-grass-alright.ngrok-free.dev" >> .env
+          echo "EXPO_PUBLIC_API_URL=http://143.95.189.218/api" > .env
+          echo "EXPO_PUBLIC_SOCKET_URL=http://143.95.189.218" >> .env
           cat .env
 
       - name: Prebuild Android (Expo)
         working-directory: apps/passenger
         run: npx expo prebuild --platform android --clean
         env:
-          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
-          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
+          EXPO_PUBLIC_API_URL: http://143.95.189.218/api
+          EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
       - name: Compilar APK (Release)
         working-directory: apps/passenger/android
         run: ./gradlew assembleRelease --no-daemon
         env:
-          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
-          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
+          EXPO_PUBLIC_API_URL: http://143.95.189.218/api
+          EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
       - name: Upload APK do Passageiro como Artefato
         uses: actions/upload-artifact@v4
@@ -98,23 +98,23 @@ jobs:
       - name: Criar .env de Produção para o Motorista
         working-directory: apps/driver
         run: |
-          echo "EXPO_PUBLIC_API_URL=https://dimmer-grass-alright.ngrok-free.dev/api" > .env
-          echo "EXPO_PUBLIC_SOCKET_URL=https://dimmer-grass-alright.ngrok-free.dev" >> .env
+          echo "EXPO_PUBLIC_API_URL=http://143.95.189.218/api" > .env
+          echo "EXPO_PUBLIC_SOCKET_URL=http://143.95.189.218" >> .env
           cat .env
 
       - name: Prebuild Android (Expo)
         working-directory: apps/driver
         run: npx expo prebuild --platform android --clean
         env:
-          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
-          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
+          EXPO_PUBLIC_API_URL: http://143.95.189.218/api
+          EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
       - name: Compilar APK (Release)
         working-directory: apps/driver/android
         run: ./gradlew assembleRelease --no-daemon
         env:
-          EXPO_PUBLIC_API_URL: https://dimmer-grass-alright.ngrok-free.dev/api
-          EXPO_PUBLIC_SOCKET_URL: https://dimmer-grass-alright.ngrok-free.dev
+          EXPO_PUBLIC_API_URL: http://143.95.189.218/api
+          EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
       - name: Upload APK do Motorista como Artefato
         uses: actions/upload-artifact@v4
