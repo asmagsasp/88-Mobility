@@ -10,6 +10,7 @@ import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { OSMMap, type CarPosition, type RouteCoordinate } from '../components/OSMMap';
+import { ChatModal } from '../components/ChatModal';
 import type { Ride } from '../types';
 import type { PassengerRideHistoryItem } from './HistoryScreen';
 import {
@@ -86,6 +87,8 @@ export function HomeScreen() {
   const [activeRide, setActiveRide]       = useState<Partial<Ride> | null>(null);
   const [rideStatus, setRideStatus]       = useState<ActiveRideStatus>('arriving');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
+  const [showChat, setShowChat]           = useState(false);
+  const [chatUnread, setChatUnread]       = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Monitora altura do teclado virtual para ajuste fluido
@@ -896,7 +899,14 @@ export function HomeScreen() {
 
           {/* Botões de Ação */}
           <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.contactBtn} onPress={contactDriver}>
+                        <TouchableOpacity
+              style={[styles.chatBtn, chatUnread > 0 && styles.chatBtnActive]}
+              onPress={() => { setShowChat(true); setChatUnread(0); }}
+            >
+              <Text style={styles.chatBtnText}>
+                💬 Chat{chatUnread > 0 ? ` (${chatUnread})` : ''}
+              </Text>
+            </TouchableOpacity>            <TouchableOpacity style={styles.contactBtn} onPress={contactDriver}>
               <Text style={styles.contactBtnText}>📞 Falar com {activeRide.driverName?.split(' ')[0] || 'Motorista'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.finishBtn} onPress={completeRide}>
@@ -907,6 +917,19 @@ export function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      )}
+
+      {/* Chat em tempo real com o motorista */}
+      {currentRideId && (
+        <ChatModal
+          visible={showChat}
+          onClose={() => setShowChat(false)}
+          rideId={currentRideId}
+          currentUserId={user?.id ?? ''}
+          currentUserRole="PASSENGER"
+          otherPartyName={`Chat com ${activeRide?.driverName?.split(' ')[0] ?? 'Motorista'}`}
+          onNewMessage={() => setChatUnread(prev => prev + 1)}
+        />
       )}
 
       {/* Buscando motorista em tempo real com Radar estilo 99 */}
@@ -1340,6 +1363,23 @@ const styles = StyleSheet.create({
   },
   cancelBtnText: {
     color: Colors.danger,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  chatBtn: {
+    flex: 1,
+    backgroundColor: '#E8F0FF',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#003580',
+  },
+  chatBtnActive: {
+    backgroundColor: '#003580',
+  },
+  chatBtnText: {
+    color: '#003580',
     fontWeight: '700',
     fontSize: 13,
   },

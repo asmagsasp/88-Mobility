@@ -5,11 +5,12 @@ import { env, allowedOrigins } from './config/env';
 import { redis, REDIS_KEYS } from './config/redis';
 import { prisma } from './config/database';
 import { JwtPayload, DriverLocation } from './shared/types';
+import { saveMessage, markMessagesAsRead } from './modules/chat/chat.service';
 
 // ============================================================
-// Socket.io — Comunicação em tempo real
-// Responsável por: localização em tempo real, matching de corridas
-// e notificações de status
+// Socket.io -- Comunicacao em tempo real
+// Responsavel por: localizacao em tempo real, matching de corridas,
+// notificacoes de status e chat entre motorista e passageiro
 // ============================================================
 
 export function initSocket(httpServer: HttpServer): SocketServer {
@@ -23,14 +24,14 @@ export function initSocket(httpServer: HttpServer): SocketServer {
   });
 
   // ============================================================
-  // Middleware de autenticação JWT no handshake
+  // Middleware de autenticacao JWT no handshake
   // O cliente deve enviar: { auth: { token: 'Bearer <jwt>' } }
   // ============================================================
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token?.replace('Bearer ', '');
 
     if (!token) {
-      return next(new Error('Token de autenticação não fornecido'));
+      return next(new Error('Token de autenticacao nao fornecido'));
     }
 
     try {
@@ -38,18 +39,18 @@ export function initSocket(httpServer: HttpServer): SocketServer {
       socket.data.user = payload;
       next();
     } catch {
-      next(new Error('Token inválido ou expirado'));
+      next(new Error('Token invalido ou expirado'));
     }
   });
 
   // ============================================================
-  // Conexão de clientes
+  // Conexao de clientes
   // ============================================================
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as JwtPayload;
-    console.log(`🔌 Socket conectado: ${user.userId} (${user.role})`);
+    console.log(`Socket conectado: ${user.userId} (${user.role})`);
 
-    // Adiciona o socket ao room do usuário (para enviar mensagens diretas)
+    // Adiciona o socket ao room do usuario (para enviar mensagens diretas)
     socket.join(`user:${user.userId}`);
 
     // ============================================================
@@ -60,10 +61,71 @@ export function initSocket(httpServer: HttpServer): SocketServer {
     }
 
     // ============================================================
-    // Desconexão
+    // Chat em tempo real (Motorista <-> Passageiro)
+    // ============================================================
+
+    /**
+     * chat:join -- entra no room da corrida para receber mensagens
+     * Payload: { rideId: string }
+     */
+    socket.on('chat:join', ({ rideId }: { rideId: string }) => {
+      socket.join(`chat:${rideId}`);
+      console.log(`[Chat] ${user.userId} entrou na corrida ${rideId}`);
+    });
+
+    /**
+     * chat:leave -- sai do room da corrida
+     * Payload: { rideId: string }
+     */
+    socket.on('chat:leave', ({ rideId }: { rideId: string }) => {
+      socket.leave(`chat:${rideId}`);
+    });
+
+    /**
+     * chat:message -- envia uma mensagem
+     * Payload: { rideId: string, content: string }
+     */
+    socket.on('chat:message', async ({ rideId, content }: { rideId: string; content: string }) => {
+      try {
+        const msg = await saveMessage(rideId, user.userId, user.role, content);
+        // Emite para todos no room da corrida (incluindo o remetente)
+        io.to(`chat:${rideId}`).emit('chat:message', msg);
+      } catch (err: any) {
+        socket.emit('chat:error', { message: err.message || 'Erro ao enviar mensagem' });
+      }
+    });
+
+    /**
+     * chat:typing -- indica que o usuario esta digitando
+     * Payload: { rideId: string, isTyping: boolean }
+     */
+    socket.on('chat:typing', ({ rideId, isTyping }: { rideId: string; isTyping: boolean }) => {
+      socket.to(`chat:${rideId}`).emit('chat:typing', {
+        userId: user.userId,
+        role: user.role,
+        isTyping,
+      });
+    });
+
+    /**
+     * chat:read -- marca mensagens como lidas
+     * Payload: { rideId: string }
+     */
+    socket.on('chat:read', async ({ rideId }: { rideId: string }) => {
+      try {
+        await markMessagesAsRead(rideId, user.userId);
+        // Notifica o outro participante que as mensagens foram lidas
+        socket.to(`chat:${rideId}`).emit('chat:read', { readBy: user.userId });
+      } catch {
+        // Silencioso
+      }
+    });
+
+    // ============================================================
+    // Desconexao
     // ============================================================
     socket.on('disconnect', async () => {
-      console.log(`❌ Socket desconectado: ${user.userId}`);
+      console.log(`Socket desconectado: ${user.userId}`);
 
       if (user.role === 'DRIVER') {
         await handleDriverDisconnect(user.userId);
@@ -85,7 +147,7 @@ function handleDriverConnection(
 ): void {
   /**
    * Evento: 'driver:location'
-   * Motorista envia sua localização periodicamente (a cada ~3 segundos)
+   * Motorista envia sua localizacao periodicamente (a cada ~3 segundos)
    * Payload: { lat: number, lng: number, heading?: number }
    */
   socket.on('driver:location', async (data: Omit<DriverLocation, 'driverId' | 'timestamp'>) => {
@@ -101,7 +163,7 @@ function handleDriverConnection(
         driverId
       );
 
-      // Atualiza no banco (com debounce implícito via socket)
+      // Atualiza no banco (com debounce implicito via socket)
       await prisma.driverProfile.update({
         where: { userId: driverId },
         data: { currentLat: lat, currentLng: lng },
@@ -118,7 +180,7 @@ function handleDriverConnection(
         });
 
         if (ride) {
-          // Emite localização para o passageiro da corrida ativa
+          // Emite localizacao para o passageiro da corrida ativa
           io.to(`user:${ride.passengerId}`).emit('driver:location:update', {
             driverId,
             lat,
@@ -129,7 +191,7 @@ function handleDriverConnection(
         }
       }
     } catch (err) {
-      console.error('Erro ao processar localização do motorista:', err);
+      console.error('Erro ao processar localizacao do motorista:', err);
     }
   });
 
@@ -146,7 +208,7 @@ function handleDriverConnection(
       });
 
       if (!ride || ride.status !== 'REQUESTED') {
-        socket.emit('error', { message: 'Corrida não disponível' });
+        socket.emit('error', { message: 'Corrida nao disponivel' });
         return;
       }
 
@@ -163,8 +225,8 @@ function handleDriverConnection(
   });
 
   /**
-   * Evento: 'ride:request' (emitido pelo backend para motoristas próximos)
-   * Os motoristas recebem esse evento quando há uma nova solicitação próxima
+   * Evento: 'driver:arrived'
+   * Motorista informa que chegou ao local do passageiro
    */
   socket.on('driver:arrived', async (data: { rideId: string }) => {
     try {
@@ -199,15 +261,15 @@ async function handleDriverDisconnect(driverId: string): Promise<void> {
       data: { isOnline: false },
     });
 
-    console.log(`✅ Motorista ${driverId} removido do índice de online`);
+    console.log(`Motorista ${driverId} removido do indice de online`);
   } catch (err) {
     console.error(`Erro ao desconectar motorista ${driverId}:`, err);
   }
 }
 
 /**
- * Notifica motoristas próximos sobre nova solicitação de corrida.
- * Chamado pelo rides.service após criar uma nova corrida.
+ * Notifica motoristas proximos sobre nova solicitacao de corrida.
+ * Chamado pelo rides.service apos criar uma nova corrida.
  */
 export async function notifyNearbyDrivers(
   io: SocketServer,
@@ -237,7 +299,7 @@ export async function notifyNearbyDrivers(
       '10'
     ) as string[];
 
-    // Envia evento de nova corrida para cada motorista próximo
+    // Envia evento de nova corrida para cada motorista proximo
     for (const driverId of nearbyDrivers) {
       io.to(`user:${driverId}`).emit('ride:new_request', {
         ...rideData,
@@ -245,7 +307,7 @@ export async function notifyNearbyDrivers(
       });
     }
 
-    console.log(`📢 Nova corrida ${rideData.rideId} notificada para ${nearbyDrivers.length} motoristas`);
+    console.log(`Nova corrida ${rideData.rideId} notificada para ${nearbyDrivers.length} motoristas`);
   } catch (err) {
     console.error('Erro ao notificar motoristas:', err);
   }

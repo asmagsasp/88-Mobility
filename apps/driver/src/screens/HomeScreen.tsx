@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { OSMMap, type CarPosition, type RouteCoordinate } from '../components/OSMMap';
+import { ChatModal } from '../components/ChatModal';
 import { NavigationBanner } from '../components/NavigationBanner';
 import type { CompletedDriverRide } from './EarningsScreen';
 import {
@@ -99,6 +100,8 @@ export function HomeScreen() {
   const [isOnline, setIsOnline]       = useState(false);
   const [rideRequest, setRideRequest] = useState<SyncRidePayload | null>(null);
   const [activeRide, setActiveRide]   = useState<SyncRidePayload | null>(null);
+  const [showChat, setShowChat]       = useState(false);
+  const [chatUnread, setChatUnread]   = useState(0);
   const [ridePhase, setRidePhase]     = useState<RidePhase>('idle');
   const [completedToday, setCompletedToday] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
 
@@ -840,6 +843,18 @@ export function HomeScreen() {
               <Text style={styles.floatingActionBtnText}>🚀 Iniciar Viagem com Passageiro</Text>
             </TouchableOpacity>
           )}
+          {(ridePhase === 'at_passenger' || ridePhase === 'to_destination') && (
+            <TouchableOpacity
+              style={[styles.floatingActionBtn, { backgroundColor: chatUnread > 0 ? '#003580' : '#1E3A5F', marginBottom: 8 }]}
+              onPress={() => { setShowChat(true); setChatUnread(0); }}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.floatingActionBtnText}>
+                💬 Chat com Passageiro{chatUnread > 0 ? ` (${chatUnread})` : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
+          
 
           {ridePhase === 'to_destination' && (
             <TouchableOpacity
@@ -851,6 +866,19 @@ export function HomeScreen() {
             </TouchableOpacity>
           )}
         </View>
+      )}
+
+      {/* Chat em tempo real com o passageiro */}
+      {activeRide?.id && (
+        <ChatModal
+          visible={showChat}
+          onClose={() => setShowChat(false)}
+          rideId={activeRide.id}
+          currentUserId={driver?.id ?? ''}
+          currentUserRole="DRIVER"
+          otherPartyName={`Chat com ${activeRide.passengerName?.split(' ')[0] ?? 'Passageiro'}`}
+          onNewMessage={() => setChatUnread(prev => prev + 1)}
+        />
       )}
 
       {/* Popup de nova corrida recebida do passageiro */}

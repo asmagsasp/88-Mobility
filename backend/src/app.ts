@@ -11,6 +11,7 @@ import ridesRouter from './modules/rides/rides.router';
 import driversRouter from './modules/drivers/drivers.router';
 import paymentsRouter from './modules/payments/payments.router';
 import adminRouter from './modules/admin/admin.router';
+import chatRouter from './modules/chat/chat.router';
 
 // ============================================================
 // App Express — Configuração de middlewares e rotas
@@ -71,6 +72,7 @@ app.use('/api/rides', ridesRouter);
 app.use('/api/drivers', driversRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api', chatRouter);
 
 // Rota 404 para endpoints não encontrados
 app.use((_req, res) => {

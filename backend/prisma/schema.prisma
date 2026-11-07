@@ -1,5 +1,5 @@
-// Prisma Schema para 88 Mobility — SQLite (Banco de dados local em arquivo)
-// Zero-config: Não necessita de servidor PostgreSQL externo ou Docker
+// Prisma Schema para 88 Mobility -- SQLite (Banco de dados local em arquivo)
+// Zero-config: Nao necessita de servidor PostgreSQL externo ou Docker
 
 generator client {
   provider = "prisma-client-js"
@@ -10,9 +10,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================================
-// Model: Usuário (passageiros, motoristas e admins)
-// ============================================================
+// ==============================================================
+// Model: Usuario (passageiros, motoristas e admins)
+// ==============================================================
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -27,7 +27,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // Relações
+  // Relacoes
   driverProfile    DriverProfile?
   ridesAsPassenger Ride[]          @relation("PassengerRides")
   ridesAsDriver    Ride[]          @relation("DriverRides")
@@ -37,13 +37,14 @@ model User {
   deviceTokens     DeviceToken[]
   pricingUpdates   PricingConfig[] @relation("PricingUpdatedBy")
   driverPayouts    DriverPayout[]  @relation("DriverPayouts")
+  chatMessages     ChatMessage[]
 
   @@map("users")
 }
 
-// ============================================================
+// ==============================================================
 // Model: Perfil do Motorista
-// ============================================================
+// ==============================================================
 model DriverProfile {
   id                String    @id @default(uuid())
   userId            String    @unique
@@ -59,7 +60,7 @@ model DriverProfile {
   cnhPhotoUrl       String?
   crlvPhotoUrl      String?
 
-  // Dados Bancários (Repasse 88% via PIX)
+  // Dados Bancarios (Repasse 88% via PIX)
   pixKeyType        String?   // CPF, EMAIL, PHONE, RANDOM
   pixKey            String?
   pixBankName       String?
@@ -75,15 +76,15 @@ model DriverProfile {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  // Relação
+  // Relacao
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("driver_profiles")
 }
 
-// ============================================================
+// ==============================================================
 // Model: Corrida
-// ============================================================
+// ==============================================================
 model Ride {
   id                 String    @id @default(uuid())
   passengerId        String
@@ -100,11 +101,11 @@ model Ride {
   destinationLng     Float
   destinationAddress String
 
-  // Distância e valores
+  // Distancia e valores
   estimatedKm        Float
   actualKm           Float?
 
-  // Snapshot dos valores no momento da solicitação
+  // Snapshot dos valores no momento da solicitacao
   pricePerKm         Float
   platformFee        Float     @default(2.00) // Taxa fixa R$ 2,00
 
@@ -125,23 +126,24 @@ model Ride {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  // Relações
+  // Relacoes
   passenger    User          @relation("PassengerRides", fields: [passengerId], references: [id])
   driver       User?         @relation("DriverRides", fields: [driverId], references: [id])
   payment      Payment?
   driverPayout DriverPayout?
   ratings      Rating[]
+  chatMessages ChatMessage[]
 
   @@map("rides")
 }
 
-// ============================================================
-// Model: Configuração de Preço (gerenciado pelo admin)
-// ============================================================
+// ==============================================================
+// Model: Configuracao de Preco (gerenciado pelo admin)
+// ==============================================================
 model PricingConfig {
   id            String   @id @default(uuid())
-  pricePerKm    Float    // Preço por Km (ex: R$ 2.50)
-  platformFee   Float    @default(2.00) // Taxa fixa de manutenção (R$ 2.00)
+  pricePerKm    Float    // Preco por Km (ex: R$ 2.50)
+  platformFee   Float    @default(2.00) // Taxa fixa de manutencao (R$ 2.00)
   driverSplit   Float    @default(0.88) // 88% do valor do Km para o motorista
   platformSplit Float    @default(0.12) // 12% do valor do Km para a plataforma
   isActive      Boolean  @default(true)
@@ -149,15 +151,15 @@ model PricingConfig {
   updatedAt     DateTime @default(now()) @updatedAt
   createdAt     DateTime @default(now())
 
-  // Relação
+  // Relacao
   admin User @relation("PricingUpdatedBy", fields: [updatedBy], references: [id])
 
   @@map("pricing_configs")
 }
 
-// ============================================================
+// ==============================================================
 // Model: Pagamento
-// ============================================================
+// ==============================================================
 model Payment {
   id              String   @id @default(uuid())
   rideId          String   @unique
@@ -169,24 +171,24 @@ model Payment {
   gatewayId       String?
   gatewayResponse String?
   checkoutUrl     String?  // Link gerado no Checkout da InfinitePay
-  orderNsu        String?  // Identificador único do pedido na 88 Mobility / InfinitePay
-  transactionNsu  String?  // Identificador da transação retornado pela adquirente
+  orderNsu        String?  // Identificador unico do pedido na 88 Mobility / InfinitePay
+  transactionNsu  String?  // Identificador da transacao retornado pela adquirente
   captureMethod   String?  // pix, credit_card
   driverShare     Float?   // 88% do valor da corrida
   platformFee     Float?   // 12% do valor da corrida + taxas
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  // Relações
+  // Relacoes
   ride Ride @relation(fields: [rideId], references: [id])
   user User @relation(fields: [userId], references: [id])
 
   @@map("payments")
 }
 
-// ============================================================
-// Model: Repasse ao Motorista (88% via PIX automático)
-// ============================================================
+// ==============================================================
+// Model: Repasse ao Motorista (88% via PIX automatico)
+// ==============================================================
 model DriverPayout {
   id            String    @id @default(uuid())
   rideId        String    @unique
@@ -197,23 +199,23 @@ model DriverPayout {
   pixBankName   String?
   status        String    @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
   provider      String    @default("PIX_AUTOMATIC")
-  transactionId String?   // ID da transação Pix de saída / endToEndId
+  transactionId String?   // ID da transacao Pix de saida / endToEndId
   receiptUrl    String?
   errorMessage  String?
   processedAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // Relações
+  // Relacoes
   ride   Ride @relation(fields: [rideId], references: [id])
   driver User @relation("DriverPayouts", fields: [driverId], references: [id])
 
   @@map("driver_payouts")
 }
 
-// ============================================================
-// Model: Avaliação
-// ============================================================
+// ==============================================================
+// Model: Avaliacao
+// ==============================================================
 model Rating {
   id         String   @id @default(uuid())
   rideId     String
@@ -223,7 +225,7 @@ model Rating {
   comment    String?
   createdAt  DateTime @default(now())
 
-  // Relações
+  // Relacoes
   ride     Ride @relation(fields: [rideId], references: [id])
   fromUser User @relation("RatingsGiven", fields: [fromUserId], references: [id])
   toUser   User @relation("RatingsReceived", fields: [toUserId], references: [id])
@@ -232,9 +234,9 @@ model Rating {
   @@map("ratings")
 }
 
-// ============================================================
+// ==============================================================
 // Model: Token de dispositivo para push notifications
-// ============================================================
+// ==============================================================
 model DeviceToken {
   id        String   @id @default(uuid())
   userId    String
@@ -248,9 +250,9 @@ model DeviceToken {
   @@map("device_tokens")
 }
 
-// ============================================================
-// Model: Eventos de sincronização em tempo real (Rides Live Events)
-// ============================================================
+// ==============================================================
+// Model: Eventos de sincronizacao em tempo real (Rides Live Events)
+// ==============================================================
 model RideSyncEvent {
   id        String   @id @default(uuid())
   rideId    String
@@ -260,4 +262,24 @@ model RideSyncEvent {
 
   @@index([rideId])
   @@map("ride_sync_events")
+}
+
+// ==============================================================
+// Model: Mensagem de Chat (Motorista <-> Passageiro)
+// ==============================================================
+model ChatMessage {
+  id         String    @id @default(uuid())
+  rideId     String
+  senderId   String
+  senderRole String    // PASSENGER | DRIVER
+  content    String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  // Relacoes
+  ride   Ride @relation(fields: [rideId], references: [id])
+  sender User @relation(fields: [senderId], references: [id])
+
+  @@index([rideId])
+  @@map("chat_messages")
 }
