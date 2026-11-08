@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StatusBar, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
@@ -21,9 +21,10 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
 
 function TabBar({ active, onPress }: { active: Tab; onPress: (t: Tab) => void }) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.tabBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+    <View style={[styles.tabBar, { backgroundColor: colors.card, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 10) }]}>
       {TABS.map(tab => (
         <TouchableOpacity
           key={tab.id}
@@ -49,15 +50,15 @@ function AppNavigator() {
 
   if (!isAuthenticated) {
     return (
-      <>
+      <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['top', 'bottom', 'left', 'right']}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
         <LoginScreen onLogin={() => {}} />
-      </>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.background }]} edges={['bottom']}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <View style={{ flex: 1 }}>
         {tab === 'home'    && <HomeScreen />}
@@ -65,7 +66,7 @@ function AppNavigator() {
         {tab === 'profile' && <ProfileScreen />}
       </View>
       <TabBar active={tab} onPress={setTab} />
-    </SafeAreaView>
+    </View>
   );
 }
 

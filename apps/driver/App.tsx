@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StatusBar, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -20,8 +20,10 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
 ];
 
 function TabBar({ active, onPress }: { active: Tab; onPress: (t: Tab) => void }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.tabBar}>
+    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
       {TABS.map(tab => (
         <TouchableOpacity
           key={tab.id}
@@ -44,14 +46,19 @@ function AppNavigator() {
   const { isAuthenticated } = useAuth();
   const [tab, setTab] = useState<Tab>('home');
 
-  // Não autenticado → tela de login
+  // Não autenticado → tela de login com safe area
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => {}} />;
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+        <StatusBar barStyle="light-content" />
+        <LoginScreen onLogin={() => {}} />
+      </SafeAreaView>
+    );
   }
 
   // Autenticado → navegação por abas
   return (
-    <SafeAreaView style={styles.root} edges={['bottom']}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <StatusBar barStyle="light-content" />
       <View style={{ flex: 1 }}>
         {tab === 'home'     && <HomeScreen />}

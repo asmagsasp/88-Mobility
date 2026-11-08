@@ -89,23 +89,6 @@ export function HomeScreen() {
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
   const [showChat, setShowChat]           = useState(false);
   const [chatUnread, setChatUnread]       = useState(0);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-
-  // Monitora altura do teclado virtual para ajuste fluido
-  useEffect(() => {
-    const showSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-      (e) => setKeyboardHeight(e.endCoordinates.height)
-    );
-    const hideSub = Keyboard.addListener(
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-      () => setKeyboardHeight(0)
-    );
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   // Rota e Carrinho 99
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
@@ -120,7 +103,7 @@ export function HomeScreen() {
     lastSeen: number;
   }[]>([]);
 
-  const lastPollTime = useRef<number>(Math.floor(Date.now() / 1000) - 30);
+  const lastPollParam = useRef<string | number>('45s');
 
   // Inicializa o serviço de notificações em segundo plano
   useEffect(() => {
@@ -408,12 +391,16 @@ export function HomeScreen() {
     const interval = setInterval(async () => {
       if (!isPolling) return;
       try {
-        const { events, latestTime } = await pollRideEvents(lastPollTime.current);
-        lastPollTime.current = latestTime;
+        const { events, latestTime, latestId } = await pollRideEvents(lastPollParam.current);
+        if (latestId) {
+          lastPollParam.current = latestId;
+        } else {
+          lastPollParam.current = latestTime;
+        }
 
-        // Remove motoristas inativos cujo sinal expirou há mais de 30 segundos
+        // Mantém motoristas ativos dos últimos 2 minutos
         const now = Date.now();
-        setOnlineDrivers((prev) => prev.filter((d) => (now - d.lastSeen) <= 60000));
+        setOnlineDrivers((prev) => prev.filter((d) => (now - d.lastSeen) <= 120000));
 
         for (const ev of events) {
           // 1. Atualização do status online/offline do motorista
@@ -478,16 +465,44 @@ export function HomeScreen() {
             const startDriverLng = ev.driver?.longitude || coords.lng;
             loadDriverRouteToPassenger(startDriverLat, startDriverLng, dName, vName);
 
-          } else if (ev.type === 'DRIVER_LOCATION' && currentRideId && ev.rideId === currentRideId) {
+          } else if (ev.type === 'DRIVER_LOCATION') {
             // Posição em tempo real recebida do GPS FÍSICO real do motorista
-            const currentDriverName = activeRide?.driverName || ev.driverName || 'Motorista';
-            const vehicleName = activeRide?.driverVehicle || ev.vehicle || 'Honda Fit';
-            setCarPosition({
-              latitude: ev.latitude,
-              longitude: ev.longitude,
-              heading: ev.heading || 0,
-              label: `${currentDriverName.split(' ')[0]} · ${vehicleName}`,
+            const driverId = ev.driverId || 'abel-driver';
+            setOnlineDrivers((prev) => {
+              const existing = prev.find((d) => d.id === driverId);
+              if (existing) {
+                return prev.map((d) =>
+                  d.id === driverId
+                    ? { ...d, latitude: ev.latitude, longitude: ev.longitude, lastSeen: Date.now() }
+                    : d
+                );
+              } else {
+                return [
+                  ...prev,
+                  {
+                    id: driverId,
+                    latitude: ev.latitude,
+                    longitude: ev.longitude,
+                    vehicle: ev.vehicle || 'Honda Fit',
+                    plate: 'BRA2E19',
+                    name: ev.driverName || 'Motorista Parceiro',
+                    lastSeen: Date.now(),
+                  },
+                ];
+              }
             });
+
+            // Se pertencer à corrida atual ativa, atualiza também a rota e o ícone do carro na tela
+            if (currentRideId && ev.rideId === currentRideId) {
+              const currentDriverName = activeRide?.driverName || ev.driverName || 'Motorista';
+              const vehicleName = activeRide?.driverVehicle || ev.vehicle || 'Honda Fit';
+              setCarPosition({
+                latitude: ev.latitude,
+                longitude: ev.longitude,
+                heading: ev.heading || 0,
+                label: `${currentDriverName.split(' ')[0]} · ${vehicleName}`,
+              });
+            }
 
           } else if (ev.type === 'ARRIVED_PASSENGER' && currentRideId && ev.rideId === currentRideId) {
             // Motorista chegou ao ponto de embarque
@@ -1033,14 +1048,14 @@ export function HomeScreen() {
         </View>
       )}
 
-      {/* 1. Modal / Tela de Busca de Destino no Topo (O teclado NUNCA sobrepõe) */}
+      {/* 1. Modal / Tela de Busca de Destino no Topo */}
       {step === 'selecting_destination' && (
         <View
           style={[
             styles.destinationSearchOverlay,
             {
               backgroundColor: colors.background,
-              paddingBottom: Math.max(Spacing.md, keyboardHeight),
+              paddingBottom: Spacing.md,
             },
           ]}
         >

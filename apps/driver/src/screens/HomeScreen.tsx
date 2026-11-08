@@ -136,10 +136,16 @@ export function HomeScreen() {
   const navStateRef = useRef<ActiveNavState | null>(null);
 
   // Intervalos de polling e animação
-  const lastPollTime   = useRef<number>(Math.floor(Date.now() / 1000) - 60);
+  const lastPollParam   = useRef<string | number>('45s');
   const rejectedRideIds = useRef<Set<string>>(new Set());
-  const slideAnim      = useRef(new Animated.Value(300)).current;
-  const lastHeartbeat  = useRef<number>(0);
+  const slideAnim       = useRef(new Animated.Value(300)).current;
+  const lastHeartbeat   = useRef<number>(0);
+  const isOnlineRef     = useRef(isOnline);
+  isOnlineRef.current   = isOnline;
+  const rideRequestRef  = useRef(rideRequest);
+  rideRequestRef.current = rideRequest;
+  const activeRideRef   = useRef(activeRide);
+  activeRideRef.current = activeRide;
 
   // Carrega ganhos reais do dia a partir do storage
   const loadTodayStats = async () => {
@@ -381,15 +387,19 @@ export function HomeScreen() {
           });
         }
 
-        const { events, latestTime } = await pollRideEvents(lastPollTime.current);
-        lastPollTime.current = latestTime;
+        const { events, latestTime, latestId } = await pollRideEvents(lastPollParam.current);
+        if (latestId) {
+          lastPollParam.current = latestId;
+        } else {
+          lastPollParam.current = latestTime;
+        }
 
         for (const ev of events) {
           if (ev.type === 'REQUEST_RIDE') {
             const requested = ev.ride;
             if (rejectedRideIds.current.has(requested.id)) continue;
-            if (activeRide && activeRide.id === requested.id) continue;
-            if (rideRequest && rideRequest.id === requested.id) continue;
+            if (activeRideRef.current && activeRideRef.current.id === requested.id) continue;
+            if (rideRequestRef.current && rideRequestRef.current.id === requested.id) continue;
 
             // Nova chamada recebida do passageiro!
             setRideRequest(requested);
@@ -403,10 +413,10 @@ export function HomeScreen() {
             );
           } else if (ev.type === 'CANCEL_RIDE') {
             sendRideNotification('Corrida Cancelada ⚠️', 'O passageiro cancelou a corrida.');
-            if (rideRequest && rideRequest.id === ev.rideId) {
+            if (rideRequestRef.current && rideRequestRef.current.id === ev.rideId) {
               dismissRequest();
               Alert.alert('Chamada Cancelada', 'O passageiro cancelou o pedido de corrida.');
-            } else if (activeRide && activeRide.id === ev.rideId) {
+            } else if (activeRideRef.current && activeRideRef.current.id === ev.rideId) {
               stopNavigation();
               setActiveRide(null);
               setBgActiveRide(null); // Limpa corrida ativa no BG Task
@@ -428,10 +438,10 @@ export function HomeScreen() {
               'PIX Recebido! 💸',
               `Pagamento aprovado na InfinitePay!\n\nRepasse de 88% no valor de R$ ${Number(amount).toFixed(2)} transferido com sucesso para sua chave PIX.\n${txText}`
             );
-          } else if (ev.type === 'CHAT_MESSAGE' && activeRide && ev.rideId === activeRide.id) {
+          } else if (ev.type === 'CHAT_MESSAGE' && activeRideRef.current && ev.rideId === activeRideRef.current.id) {
             if (ev.message.senderId !== (driver?.id ?? '')) {
               try {
-                const chatKey = `@88mobility_chat_${activeRide.id}`;
+                const chatKey = `@88mobility_chat_${activeRideRef.current.id}`;
                 const stored = await AsyncStorage.getItem(chatKey);
                 const list = stored ? JSON.parse(stored) : [];
                 if (!list.some((m: any) => m.id === ev.message.id)) {
@@ -456,14 +466,16 @@ export function HomeScreen() {
     return () => {
       isPolling = false;
       clearInterval(interval);
-      // Notifica os passageiros que o motorista ficou offline
-      publishRideEvent({
-        type: 'DRIVER_STATUS',
-        driverId: driver?.id || 'abel-driver',
-        isOnline: false,
-      });
+      // Notifica os passageiros somente se o motorista REALMENTE ficou offline
+      if (!isOnlineRef.current) {
+        publishRideEvent({
+          type: 'DRIVER_STATUS',
+          driverId: driver?.id || 'abel-driver',
+          isOnline: false,
+        });
+      }
     };
-  }, [isOnline, rideRequest, activeRide]);
+  }, [isOnline]);
 
   // Limpa navegação ativa
   const stopNavigation = () => {

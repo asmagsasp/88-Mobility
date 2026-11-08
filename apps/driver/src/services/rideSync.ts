@@ -1,7 +1,7 @@
 // Serviço de sincronização em tempo real entre Passageiro e Motorista
 // Integração dupla: Banco SQLite no Backend + Ponte de eventos em tempo real (ntfy.sh)
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://143.95.189.218/api';
 const SYNC_URL = 'https://ntfy.sh/88mobility_live_rides_sync';
 
 export interface SyncRidePayload {
@@ -73,26 +73,40 @@ export async function publishRideEvent(event: RideSyncEvent): Promise<boolean> {
 }
 
 /**
- * Busca eventos recentes no canal
+ * Busca eventos recentes no canal (suporta ID da última mensagem ou timestamp)
  */
-export async function pollRideEvents(sinceSeconds?: number): Promise<{ events: RideSyncEvent[]; latestTime: number }> {
+export async function pollRideEvents(sinceParam?: string | number): Promise<{
+  events: RideSyncEvent[];
+  latestTime: number;
+  latestId?: string;
+}> {
+  const fallbackTime = Math.floor(Date.now() / 1000);
   try {
-    const sinceParam = sinceSeconds ? `&since=${sinceSeconds}` : '&since=5m';
-    const res = await fetch(`${SYNC_URL}/json?poll=1${sinceParam}`, {
+    const param = sinceParam ? `&since=${sinceParam}` : '&since=45s';
+    const res = await fetch(`${SYNC_URL}/json?poll=1${param}`, {
       headers: { 'Accept': 'application/x-ndjson' },
     });
 
-    if (!res.ok) return { events: [], latestTime: sinceSeconds || Math.floor(Date.now() / 1000) };
+    if (!res.ok) {
+      return {
+        events: [],
+        latestTime: typeof sinceParam === 'number' ? sinceParam : fallbackTime,
+      };
+    }
 
     const text = await res.text();
     const lines = text.trim().split('\n');
     const events: RideSyncEvent[] = [];
-    let latestTime = sinceSeconds || Math.floor(Date.now() / 1000);
+    let latestTime = typeof sinceParam === 'number' ? sinceParam : fallbackTime;
+    let latestId: string | undefined = undefined;
 
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const item = JSON.parse(line);
+        if (item.id) {
+          latestId = item.id;
+        }
         if (item.time && item.time > latestTime) {
           latestTime = item.time;
         }
@@ -107,9 +121,12 @@ export async function pollRideEvents(sinceSeconds?: number): Promise<{ events: R
       }
     }
 
-    return { events, latestTime };
+    return { events, latestTime, latestId };
   } catch (err) {
     console.warn('[Sync] Erro ao consultar eventos:', err);
-    return { events: [], latestTime: sinceSeconds || Math.floor(Date.now() / 1000) };
+    return {
+      events: [],
+      latestTime: typeof sinceParam === 'number' ? sinceParam : fallbackTime,
+    };
   }
 }
