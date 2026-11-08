@@ -390,12 +390,7 @@ export function HomeScreen() {
           });
         }
 
-        const { events, latestTime, latestId } = await pollRideEvents(lastPollParam.current);
-        if (latestId) {
-          lastPollParam.current = latestId;
-        } else {
-          lastPollParam.current = latestTime;
-        }
+        const { events } = await pollRideEvents();
 
         for (const ev of events) {
           if (ev.type === 'REQUEST_RIDE') {
@@ -415,16 +410,16 @@ export function HomeScreen() {
               { rideId: requested.id }
             );
           } else if (ev.type === 'CANCEL_RIDE') {
-            sendRideNotification('Corrida Cancelada ⚠️', 'O passageiro cancelou a corrida.');
-            if (rideRequestRef.current && rideRequestRef.current.id === ev.rideId) {
+            sendRideNotification('Corrida Cancelada ⚠️', 'O passageiro cancelou o pedido.');
+            if (rideRequestRef.current && (!ev.rideId || ev.rideId === 'global' || rideRequestRef.current.id === ev.rideId)) {
               dismissRequest();
               Alert.alert('Chamada Cancelada', 'O passageiro cancelou o pedido de corrida.');
-            } else if (activeRideRef.current && activeRideRef.current.id === ev.rideId) {
+            } else if (activeRideRef.current && (!ev.rideId || ev.rideId === 'global' || activeRideRef.current.id === ev.rideId)) {
               stopNavigation();
               setActiveRide(null);
               setBgActiveRide(null); // Limpa corrida ativa no BG Task
               setRidePhase('idle');
-              Alert.alert('Corrida Cancelada', 'O passageiro cancelou a corrida em andamento.');
+              Alert.alert('Corrida Cancelada', 'O passageiro cancelou a corrida.');
             }
           } else if (ev.type === 'DRIVER_PAYOUT_RECEIVED' || ev.type === 'PAYMENT_CONFIRMED') {
             const amount =

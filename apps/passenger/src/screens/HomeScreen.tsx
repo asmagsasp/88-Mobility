@@ -107,6 +107,10 @@ export function HomeScreen() {
   }[]>([]);
 
   const lastPollParam = useRef<string | number>('45s');
+  const currentRideIdRef = useRef(currentRideId);
+  currentRideIdRef.current = currentRideId;
+  const stepRef = useRef(step);
+  stepRef.current = step;
 
   // Inicializa o serviço de notificações em segundo plano
   useEffect(() => {
@@ -394,12 +398,7 @@ export function HomeScreen() {
     const interval = setInterval(async () => {
       if (!isPolling) return;
       try {
-        const { events, latestTime, latestId } = await pollRideEvents(lastPollParam.current);
-        if (latestId) {
-          lastPollParam.current = latestId;
-        } else {
-          lastPollParam.current = latestTime;
-        }
+        const { events } = await pollRideEvents();
 
         // Mantém motoristas ativos dos últimos 2 minutos
         const now = Date.now();
@@ -534,36 +533,42 @@ export function HomeScreen() {
               loadTripRouteToDestination(coords.lat, coords.lng, destination.lat, destination.lng);
             }
 
-          } else if (ev.type === 'DECLINE_RIDE' && currentRideId && ev.rideId === currentRideId) {
-            setStep('confirming');
-            stopBackgroundKeepAlive();
-            sendRideNotification(
-              'Motorista Ocupado',
-              'O motorista não pôde aceitar esta chamada no momento. Tente novamente.'
-            );
-            Alert.alert(
-              'Motorista Ocupado',
-              'O motorista não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
-            );
+          } else if (ev.type === 'DECLINE_RIDE') {
+            const activeId = currentRideIdRef.current;
+            if (activeId && (!ev.rideId || ev.rideId === 'global' || ev.rideId === activeId)) {
+              setStep('confirming');
+              stopBackgroundKeepAlive();
+              sendRideNotification(
+                'Motorista Ocupado',
+                'O motorista não pôde aceitar esta chamada no momento.'
+              );
+              Alert.alert(
+                'Motorista Ocupado',
+                'O motorista não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
+              );
+            }
 
-          } else if (ev.type === 'CANCEL_RIDE' && currentRideId && ev.rideId === currentRideId) {
-            // Motorista cancelou a chamada / corrida
-            stopBackgroundKeepAlive();
-            setRouteCoordinates([]);
-            setCarPosition(null);
-            setCurrentRideId(null);
-            setActiveRide(null);
-            setStep('idle');
-            setDest(null);
-            setSearch('');
-            sendRideNotification(
-              'Corrida Cancelada ⚠️',
-              'O motorista precisou cancelar a corrida.'
-            );
-            Alert.alert(
-              'Corrida Cancelada',
-              'O motorista precisou cancelar esta chamada. Você pode solicitar um novo carro quando desejar.'
-            );
+          } else if (ev.type === 'CANCEL_RIDE') {
+            const activeId = currentRideIdRef.current;
+            const currentStep = stepRef.current;
+            if (activeId || currentStep === 'searching' || currentStep === 'active') {
+              stopBackgroundKeepAlive();
+              setRouteCoordinates([]);
+              setCarPosition(null);
+              setCurrentRideId(null);
+              setActiveRide(null);
+              setStep('idle');
+              setDest(null);
+              setSearch('');
+              sendRideNotification(
+                'Corrida Cancelada ⚠️',
+                'O motorista cancelou a chamada.'
+              );
+              Alert.alert(
+                'Corrida Cancelada',
+                'O motorista precisou cancelar esta chamada. Você pode solicitar um novo carro quando desejar.'
+              );
+            }
 
           } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista finalizou a corrida
@@ -735,20 +740,27 @@ export function HomeScreen() {
     }
   };
 
-  // Cancelar chamada
-  const cancelRide = async () => {
+  // Cancelar chamada (UI instantânea e sem travamento)
+  const cancelRide = () => {
+    const rideIdToCancel = currentRideIdRef.current;
+
+    // 1. Reseta o estado visual no mesmo instante
     stopBackgroundKeepAlive();
-    if (currentRideId) {
-      await publishRideEvent({
-        type: 'CANCEL_RIDE',
-        rideId: currentRideId,
-      });
-    }
-    setRouteCoordinates([]);
-    setCarPosition(null);
+    setStep('idle');
     setCurrentRideId(null);
     setActiveRide(null);
-    setStep('idle');
+    setCarPosition(null);
+    setRouteCoordinates([]);
+    setDest(null);
+    setSearch('');
+
+    // 2. Dispara cancelamento em background
+    if (rideIdToCancel) {
+      publishRideEvent({
+        type: 'CANCEL_RIDE',
+        rideId: rideIdToCancel,
+      }).catch(() => {});
+    }
   };
 
   // Abre tela de pagamento InfinitePay (PIX / Cartão com repasse automático de 88% ao motorista)

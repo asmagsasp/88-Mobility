@@ -1,5 +1,5 @@
 // Serviço de sincronização em tempo real entre Passageiro e Motorista
-// Integração dupla: Banco SQLite no Backend + Ponte de eventos em tempo real (ntfy.sh)
+// Integração dupla: Banco SQLite no Backend (VPS) + Ponte de eventos em tempo real (ntfy.sh)
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://143.95.189.218/api';
 const SYNC_URL = 'https://ntfy.sh/88mobility_live_rides_sync';
@@ -41,13 +41,18 @@ export type RideSyncEvent =
   | { type: 'CHAT_MESSAGE'; rideId: string; message: { id: string; rideId: string; senderId: string; senderRole: string; content: string; createdAt: string } }
   | { type: 'CHAT_TYPING'; rideId: string; userId: string; isTyping: boolean };
 
+/** Cache de IDs já processados para evitar duplicações */
+const seenEventIds = new Set<string>();
+let isInitialized = false;
+
 /**
- * Publica um evento no canal em tempo real e persiste no SQLite do Backend
+ * Publica um evento no canal em tempo real e persiste no SQLite do Backend (VPS)
  */
 export async function publishRideEvent(event: RideSyncEvent): Promise<boolean> {
-  // 1. Salva evento no banco de dados SQLite do Backend se disponível
+  const rideId = 'ride' in event ? event.ride.id : ('rideId' in event ? event.rideId : 'global');
+
+  // 1. Persiste no banco de dados SQLite do Backend (VPS)
   try {
-    const rideId = 'ride' in event ? event.ride.id : ('rideId' in event ? event.rideId : 'global');
     fetch(`${BACKEND_URL}/rides/sync/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -55,7 +60,7 @@ export async function publishRideEvent(event: RideSyncEvent): Promise<boolean> {
     }).catch(() => {});
   } catch {}
 
-  // 2. Transmite via ponte em tempo real
+  // 2. Transmite via canal em tempo real (ntfy.sh)
   try {
     const res = await fetch(SYNC_URL, {
       method: 'POST',
@@ -73,60 +78,96 @@ export async function publishRideEvent(event: RideSyncEvent): Promise<boolean> {
 }
 
 /**
- * Busca eventos recentes no canal (suporta ID da última mensagem ou timestamp)
+ * Consulta eventos recentes no canal de forma contínua e deduplicada
  */
-export async function pollRideEvents(sinceParam?: string | number): Promise<{
+export async function pollRideEvents(_unusedParam?: any): Promise<{
   events: RideSyncEvent[];
   latestTime: number;
   latestId?: string;
 }> {
-  const fallbackTime = Math.floor(Date.now() / 1000);
+  const events: RideSyncEvent[] = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  // 1. Busca eventos recentes no ntfy.sh (sem parâmetros quebrados de since)
   try {
-    const param = sinceParam ? `&since=${sinceParam}` : '&since=45s';
-    const res = await fetch(`${SYNC_URL}/json?poll=1${param}`, {
+    const res = await fetch(`${SYNC_URL}/json?poll=1`, {
       headers: { 'Accept': 'application/x-ndjson' },
     });
 
-    if (!res.ok) {
-      return {
-        events: [],
-        latestTime: typeof sinceParam === 'number' ? sinceParam : fallbackTime,
-      };
-    }
+    if (res.ok) {
+      const text = await res.text();
+      const lines = text.trim().split('\n');
 
-    const text = await res.text();
-    const lines = text.trim().split('\n');
-    const events: RideSyncEvent[] = [];
-    let latestTime = typeof sinceParam === 'number' ? sinceParam : fallbackTime;
-    let latestId: string | undefined = undefined;
+      // Se for a primeiríssima consulta do app, registra mensagens antigas para não reprocessar corridas antigas,
+      // mas preserva DRIVER_STATUS recente para saber se o motorista já está online!
+      if (!isInitialized) {
+        isInitialized = true;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const item = JSON.parse(line);
+            if (item.id) seenEventIds.add(item.id);
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const item = JSON.parse(line);
-        if (item.id) {
-          latestId = item.id;
+            // Permite capturar o último status de motorista online mesmo da primeira carga
+            if (item.event === 'message' && item.message) {
+              const payload = JSON.parse(item.message) as RideSyncEvent;
+              if (payload?.type === 'DRIVER_STATUS' && payload.isOnline) {
+                events.push(payload);
+              }
+            }
+          } catch {}
         }
-        if (item.time && item.time > latestTime) {
-          latestTime = item.time;
-        }
-        if (item.event === 'message' && item.message) {
-          const payload = JSON.parse(item.message) as RideSyncEvent;
-          if (payload && payload.type) {
-            events.push(payload);
+        return { events, latestTime: now };
+      }
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const item = JSON.parse(line);
+          if (item.id && !seenEventIds.has(item.id)) {
+            seenEventIds.add(item.id);
+            // Mantém tamanho máximo de cache para não vazar memória
+            if (seenEventIds.size > 1500) {
+              const firstKey = seenEventIds.values().next().value;
+              if (firstKey) seenEventIds.delete(firstKey);
+            }
+
+            if (item.event === 'message' && item.message) {
+              const payload = JSON.parse(item.message) as RideSyncEvent;
+              if (payload && payload.type) {
+                events.push(payload);
+              }
+            }
           }
-        }
-      } catch {
-        // Ignora linha com formato inválido
+        } catch {}
       }
     }
-
-    return { events, latestTime, latestId };
   } catch (err) {
-    console.warn('[Sync] Erro ao consultar eventos:', err);
-    return {
-      events: [],
-      latestTime: typeof sinceParam === 'number' ? sinceParam : fallbackTime,
-    };
+    console.warn('[Sync] Falha no poll ntfy:', err);
   }
+
+  // 2. Consulta de contingência no Backend VPS (SQLite) se ntfy falhar ou estiver vazio
+  if (events.length === 0) {
+    try {
+      const vpsRes = await fetch(`${BACKEND_URL}/rides/sync/events`, {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (vpsRes.ok) {
+        const json = await vpsRes.json();
+        const list = json?.data || [];
+        for (const item of list) {
+          const evtId = `vps-${item.id}`;
+          if (!seenEventIds.has(evtId)) {
+            seenEventIds.add(evtId);
+            const payload = typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload;
+            if (payload && payload.type) {
+              events.push(payload);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return { events, latestTime: now };
 }
