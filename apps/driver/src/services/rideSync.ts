@@ -37,7 +37,9 @@ export type RideSyncEvent =
   | { type: 'CANCEL_RIDE'; rideId: string }
   | { type: 'PAYMENT_CONFIRMED'; rideId: string; status: string; captureMethod?: string; totalAmount?: number; driverAmount?: number; payout?: any; timestamp?: string }
   | { type: 'DRIVER_PAYOUT_RECEIVED'; rideId: string; driverId: string; amount: number; pixKey: string; transactionId?: string; message?: string; timestamp?: string }
-  | { type: 'DRIVER_STATUS'; driverId: string; isOnline: boolean; latitude?: number; longitude?: number; vehicle?: string; plate?: string; name?: string };
+  | { type: 'DRIVER_STATUS'; driverId: string; isOnline: boolean; latitude?: number; longitude?: number; vehicle?: string; plate?: string; name?: string }
+  | { type: 'CHAT_MESSAGE'; rideId: string; message: { id: string; rideId: string; senderId: string; senderRole: string; content: string; createdAt: string } }
+  | { type: 'CHAT_TYPING'; rideId: string; userId: string; isTyping: boolean };
 
 /**
  * Publica um evento no canal em tempo real e persiste no SQLite do Backend

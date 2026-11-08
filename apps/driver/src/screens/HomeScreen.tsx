@@ -427,6 +427,24 @@ export function HomeScreen() {
               'PIX Recebido! 💸',
               `Pagamento aprovado na InfinitePay!\n\nRepasse de 88% no valor de R$ ${Number(amount).toFixed(2)} transferido com sucesso para sua chave PIX.\n${txText}`
             );
+          } else if (ev.type === 'CHAT_MESSAGE' && activeRide && ev.rideId === activeRide.id) {
+            if (ev.message.senderId !== (driver?.id ?? '')) {
+              try {
+                const chatKey = `@88mobility_chat_${activeRide.id}`;
+                const stored = await AsyncStorage.getItem(chatKey);
+                const list = stored ? JSON.parse(stored) : [];
+                if (!list.some((m: any) => m.id === ev.message.id)) {
+                  list.push(ev.message);
+                  await AsyncStorage.setItem(chatKey, JSON.stringify(list));
+                  if (!showChat) {
+                    setChatUnread((prev) => prev + 1);
+                    sendRideNotification('💬 Mensagem do Passageiro', ev.message.content);
+                  }
+                }
+              } catch (e) {
+                console.warn('Erro ao salvar chat no motorista:', e);
+              }
+            }
           }
         }
       } catch (pollErr) {

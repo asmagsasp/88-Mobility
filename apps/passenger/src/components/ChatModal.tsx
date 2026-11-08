@@ -1,13 +1,6 @@
 /**
  * ChatModal — Bate-papo em tempo real entre passageiro e motorista
- * Usado durante corrida ativa.
- *
- * Funcionalidades:
- * - Mensagens em tempo real via Socket.io
- * - Indicador "digitando..."
- * - Badge de mensagens nao lidas
- * - Historico carregado via API REST
- * - Interface estilo WhatsApp (bolhas)
+ * Sincronizado via canal em tempo real do 88 Mobility + persistência local AsyncStorage
  */
 import React, {
   useState,
@@ -28,11 +21,8 @@ import {
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
-import { io, Socket } from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000/api';
-const SOCKET_URL = API_URL.replace('/api', '');
+import { publishRideEvent, pollRideEvents } from '../services/rideSync';
 
 // ----------------------------------------------------------------
 // Tipos
@@ -43,7 +33,7 @@ export interface ChatMessage {
   senderId: string;
   senderRole: string; // PASSENGER | DRIVER
   content: string;
-  readAt: string | null;
+  readAt?: string | null;
   createdAt: string;
 }
 
@@ -55,7 +45,7 @@ interface Props {
   currentUserRole: 'PASSENGER' | 'DRIVER';
   /** Nome exibido como header (ex: "Chat com Motorista") */
   otherPartyName?: string;
-  /** Callback quando chegar nova mensagem (para badge externo) */
+  /** Callback quando chegar nova mensagem */
   onNewMessage?: () => void;
 }
 
@@ -76,163 +66,171 @@ export function ChatModal({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
+
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
-  const socketRef = useRef<Socket | null>(null);
+  const lastPollTimeRef = useRef<number>(Math.floor(Date.now() / 1000) - 60);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
-  // ---------------------------------------------------------------
-  // Carrega historico via REST
-  // ---------------------------------------------------------------
-  const loadHistory = useCallback(async () => {
-    try {
-      setLoading(true);
-      const token = await AsyncStorage.getItem('@88mobility_token');
-      const res = await fetch(`${API_URL}/rides/${rideId}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages ?? []);
-      }
-    } catch {
-      // Silencioso — WebSocket ja cobre mensagens em tempo real
-    } finally {
-      setLoading(false);
-    }
-  }, [rideId]);
+  const storageKey = `@88mobility_chat_${rideId}`;
 
   // ---------------------------------------------------------------
-  // Conecta Socket.io quando o modal abre
+  // 1. Carrega histórico de mensagens do AsyncStorage
+  // ---------------------------------------------------------------
+  const loadMessagesFromStorage = useCallback(async () => {
+    if (!rideId) return;
+    try {
+      const stored = await AsyncStorage.getItem(storageKey);
+      if (stored) {
+        const parsed: ChatMessage[] = JSON.parse(stored);
+        setMessages(parsed);
+      }
+    } catch (e) {
+      console.warn('[Chat] Erro ao carregar histórico local:', e);
+    }
+  }, [rideId, storageKey]);
+
+  // ---------------------------------------------------------------
+  // 2. Polling ativo enquanto o modal estiver aberto
   // ---------------------------------------------------------------
   useEffect(() => {
     if (!visible || !rideId) return;
 
-    loadHistory();
+    let isMounted = true;
+    setLoading(true);
 
-    let socket: Socket;
+    loadMessagesFromStorage().finally(() => {
+      if (isMounted) setLoading(false);
+    });
 
-    const connect = async () => {
-      const token = await AsyncStorage.getItem('@88mobility_token');
-      socket = io(SOCKET_URL, {
-        auth: { token: `Bearer ${token}` },
-        transports: ['websocket', 'polling'],
-      });
+    const interval = setInterval(async () => {
+      if (!isMounted) return;
+      try {
+        const { events, latestTime } = await pollRideEvents(lastPollTimeRef.current);
+        lastPollTimeRef.current = latestTime;
 
-      socketRef.current = socket;
+        for (const ev of events) {
+          if (ev.type === 'CHAT_MESSAGE' && ev.rideId === rideId) {
+            const incomingMsg: ChatMessage = { ...ev.message, readAt: null };
 
-      socket.on('connect', () => {
-        socket.emit('chat:join', { rideId });
-        // Marca mensagens como lidas ao abrir
-        socket.emit('chat:read', { rideId });
-      });
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === incomingMsg.id)) return prev;
+              const next = [...prev, incomingMsg];
+              AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
+              return next;
+            });
 
-      // Nova mensagem
-      socket.on('chat:message', (msg: ChatMessage) => {
-        setMessages((prev) => {
-          // Evita duplicata
-          if (prev.some((m) => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-        // Avisa badge externo se mensagem nao e minha
-        if (msg.senderId !== currentUserId) {
-          onNewMessage?.();
-          // Marca como lida automaticamente se o modal estiver aberto
-          socket.emit('chat:read', { rideId });
+            if (incomingMsg.senderId !== currentUserId) {
+              onNewMessage?.();
+            }
+
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+          } else if (ev.type === 'CHAT_TYPING' && ev.rideId === rideId) {
+            if (ev.userId !== currentUserId) {
+              setOtherTyping(ev.isTyping);
+            }
+          }
         }
-        // Scroll para o fim
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-      });
-
-      // Indicador "digitando..."
-      socket.on('chat:typing', ({ userId, isTyping }: { userId: string; isTyping: boolean }) => {
-        if (userId !== currentUserId) {
-          setOtherTyping(isTyping);
-        }
-      });
-    };
-
-    connect();
+      } catch (err) {
+        console.warn('[Chat] Erro no polling de mensagens:', err);
+      }
+    }, 1200);
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.emit('chat:leave', { rideId });
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      isMounted = false;
+      clearInterval(interval);
     };
-  }, [visible, rideId]);
+  }, [visible, rideId, currentUserId, loadMessagesFromStorage, onNewMessage, storageKey]);
 
   // ---------------------------------------------------------------
-  // Enviar mensagem
+  // 3. Enviar mensagem
   // ---------------------------------------------------------------
   const sendMessage = useCallback(async () => {
     const content = inputText.trim();
-    if (!content || sending) return;
+    if (!content || sending || !rideId) return;
 
     setSending(true);
     setInputText('');
     Keyboard.dismiss();
 
-    // Envia via Socket.io (preferido)
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('chat:message', { rideId, content });
-      // Cancela "typing"
-      socketRef.current.emit('chat:typing', { rideId, isTyping: false });
+    const newMsg: ChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      rideId,
+      senderId: currentUserId || `${currentUserRole.toLowerCase()}-${Date.now()}`,
+      senderRole: currentUserRole,
+      content,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    // 1. Atualiza lista local imediatamente
+    setMessages((prev) => {
+      const next = [...prev, newMsg];
+      AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+
+    // 2. Transmite mensagem pelo canal em tempo real
+    await publishRideEvent({
+      type: 'CHAT_MESSAGE',
+      rideId,
+      message: newMsg,
+    });
+
+    // 3. Cancela status de "digitando"
+    if (isTypingRef.current) {
       isTypingRef.current = false;
-    } else {
-      // Fallback: REST API
-      try {
-        const token = await AsyncStorage.getItem('@88mobility_token');
-        const res = await fetch(`${API_URL}/rides/${rideId}/messages`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ content }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setMessages((prev) => [...prev, data.message]);
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        }
-      } catch {
-        // Falha silenciosa
-      }
+      publishRideEvent({
+        type: 'CHAT_TYPING',
+        rideId,
+        userId: currentUserId,
+        isTyping: false,
+      }).catch(() => {});
     }
 
     setSending(false);
-  }, [inputText, rideId, sending]);
+  }, [inputText, sending, rideId, currentUserId, currentUserRole, storageKey]);
 
   // ---------------------------------------------------------------
-  // Indicador de digitacao (debounce 2s)
+  // 4. Indicador de digitação
   // ---------------------------------------------------------------
   const handleTyping = useCallback(
     (text: string) => {
       setInputText(text);
 
-      if (!socketRef.current?.connected) return;
+      if (!rideId) return;
 
-      if (!isTypingRef.current) {
+      if (!isTypingRef.current && text.length > 0) {
         isTypingRef.current = true;
-        socketRef.current.emit('chat:typing', { rideId, isTyping: true });
+        publishRideEvent({
+          type: 'CHAT_TYPING',
+          rideId,
+          userId: currentUserId,
+          isTyping: true,
+        }).catch(() => {});
       }
 
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       typingTimerRef.current = setTimeout(() => {
         isTypingRef.current = false;
-        socketRef.current?.emit('chat:typing', { rideId, isTyping: false });
-      }, 2000);
+        publishRideEvent({
+          type: 'CHAT_TYPING',
+          rideId,
+          userId: currentUserId,
+          isTyping: false,
+        }).catch(() => {});
+      }, 2500);
     },
-    [rideId]
+    [rideId, currentUserId]
   );
 
   // ---------------------------------------------------------------
-  // Renderizacao de cada mensagem
+  // Renderização de cada mensagem
   // ---------------------------------------------------------------
   const renderMessage = ({ item }: { item: ChatMessage }) => {
-    const isMine = item.senderId === currentUserId;
+    const isMine = item.senderId === currentUserId || item.senderRole === currentUserRole;
     const time = new Date(item.createdAt).toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
@@ -262,8 +260,7 @@ export function ChatModal({
     >
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -365,14 +362,14 @@ const styles = StyleSheet.create({
   },
   messageList: {
     padding: 12,
-    paddingBottom: 4,
+    paddingBottom: 8,
   },
   bubble: {
-    maxWidth: '75%',
+    maxWidth: '78%',
     marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
   },
   bubbleMine: {
     alignSelf: 'flex-end',
@@ -384,7 +381,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomLeftRadius: 4,
     shadowColor: '#000',
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.08,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
     elevation: 2,
@@ -400,61 +397,61 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
   },
   bubbleTime: {
-    fontSize: 10,
+    fontSize: 11,
     marginTop: 4,
   },
   bubbleTimeMine: {
-    color: 'rgba(255,255,255,0.65)',
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'right',
   },
   bubbleTimeOther: {
-    color: '#999',
+    color: '#888',
   },
   emptyText: {
     textAlign: 'center',
-    color: '#999',
+    color: '#888',
     marginTop: 60,
     fontSize: 14,
   },
   typingContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   typingText: {
-    color: '#888',
+    color: '#666',
     fontStyle: 'italic',
     fontSize: 12,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    padding: 8,
+    padding: 10,
     backgroundColor: '#fff',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#e0e0e0',
   },
   textInput: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 44,
     maxHeight: 120,
     backgroundColor: '#f0f2f5',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     fontSize: 15,
     color: '#1a1a1a',
     marginRight: 8,
   },
   sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#003580',
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendBtnDisabled: {
-    backgroundColor: '#ccc',
+    backgroundColor: '#cbd5e1',
   },
   sendBtnText: {
     color: '#fff',

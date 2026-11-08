@@ -584,6 +584,24 @@ export function HomeScreen() {
               'Pagamento Aprovado! 💳',
               `Pagamento processado com sucesso na InfinitePay!\n\nO repasse de 88% já foi transferido para a chave PIX do motorista parceiro.`
             );
+          } else if (ev.type === 'CHAT_MESSAGE' && currentRideId && ev.rideId === currentRideId) {
+            if (ev.message.senderId !== (passenger?.id ?? '')) {
+              try {
+                const chatKey = `@88mobility_chat_${currentRideId}`;
+                const stored = await AsyncStorage.getItem(chatKey);
+                const list = stored ? JSON.parse(stored) : [];
+                if (!list.some((m: any) => m.id === ev.message.id)) {
+                  list.push(ev.message);
+                  await AsyncStorage.setItem(chatKey, JSON.stringify(list));
+                  if (!showChat) {
+                    setChatUnread((prev) => prev + 1);
+                    sendRideNotification('💬 Nova Mensagem', ev.message.content);
+                  }
+                }
+              } catch (e) {
+                console.warn('Erro ao salvar chat no passageiro:', e);
+              }
+            }
           }
         }
       } catch (err) {
@@ -910,8 +928,6 @@ export function HomeScreen() {
               <Text style={styles.chatBtnText}>
                 💬 Chat{chatUnread > 0 ? ` (${chatUnread})` : ''}
               </Text>
-            </TouchableOpacity>            <TouchableOpacity style={styles.contactBtn} onPress={contactDriver}>
-              <Text style={styles.contactBtnText}>📞 Falar com {activeRide.driverName?.split(' ')[0] || 'Motorista'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.finishBtn} onPress={completeRide}>
               <Text style={styles.finishBtnText}>Concluir Viagem</Text>
