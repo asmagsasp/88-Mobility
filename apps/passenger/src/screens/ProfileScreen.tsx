@@ -10,6 +10,23 @@ import { useTheme } from '../contexts/ThemeContext';
 
 const PASSENGER_HISTORY_KEY = '@88mobility_passenger_history';
 const PASSENGER_NOTIF_KEY = '@88mobility_passenger_notifications';
+const PASSENGER_PAYMENT_KEY = '@88mobility_passenger_payment_method';
+
+type PaymentMethodKey = 'CASH' | 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD';
+
+interface PaymentOption {
+  key: PaymentMethodKey;
+  label: string;
+  sub: string;
+  icon: string;
+}
+
+const PAYMENT_OPTIONS: PaymentOption[] = [
+  { key: 'PIX',         label: 'Pix',             sub: 'Transferência instantânea via Pix',     icon: '⚡' },
+  { key: 'CREDIT_CARD', label: 'Cartão de Crédito', sub: 'Visa, Mastercard, Elo e outros',      icon: '💳' },
+  { key: 'DEBIT_CARD',  label: 'Cartão de Débito',  sub: 'Débito direto na conta',              icon: '🏧' },
+  { key: 'CASH',        label: 'Dinheiro',          sub: 'Pague em espécie ao motorista',       icon: '💵' },
+];
 
 export function ProfileScreen() {
   const { passenger, logout, updateProfile } = useAuth();
@@ -22,6 +39,12 @@ export function ProfileScreen() {
   const [editName, setEditName]           = useState(passenger?.name || '');
   const [editPhone, setEditPhone]         = useState(passenger?.phone || '');
   const [isSaving, setIsSaving]           = useState(false);
+
+  // Modal de Formas de Pagamento
+  const [showPaymentModal, setShowPaymentModal]   = useState(false);
+  const [selectedPayment, setSelectedPayment]     = useState<PaymentMethodKey>('PIX');
+  const [pendingPayment, setPendingPayment]        = useState<PaymentMethodKey>('PIX');
+  const [isSavingPayment, setIsSavingPayment]     = useState(false);
 
   useEffect(() => {
     if (passenger) {
@@ -41,6 +64,12 @@ export function ProfileScreen() {
         const storedNotif = await AsyncStorage.getItem(PASSENGER_NOTIF_KEY);
         if (storedNotif !== null) {
           setNotificationsEnabled(JSON.parse(storedNotif));
+        }
+        const storedPayment = await AsyncStorage.getItem(PASSENGER_PAYMENT_KEY);
+        if (storedPayment) {
+          const pm = storedPayment as PaymentMethodKey;
+          setSelectedPayment(pm);
+          setPendingPayment(pm);
         }
       } catch (e) {
         console.warn('Erro ao carregar histórico no perfil:', e);
@@ -72,6 +101,31 @@ export function ProfileScreen() {
     } catch (e) {
       console.warn('Erro ao salvar notificações:', e);
     }
+  };
+
+  const handleOpenPaymentModal = () => {
+    setPendingPayment(selectedPayment);
+    setShowPaymentModal(true);
+  };
+
+  const handleSavePayment = async () => {
+    setIsSavingPayment(true);
+    try {
+      await AsyncStorage.setItem(PASSENGER_PAYMENT_KEY, pendingPayment);
+      setSelectedPayment(pendingPayment);
+      setShowPaymentModal(false);
+      const opt = PAYMENT_OPTIONS.find(o => o.key === pendingPayment);
+      Alert.alert('Forma de Pagamento Salva', `${opt?.icon} ${opt?.label} definido como padrão para suas corridas.`);
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível salvar a forma de pagamento.');
+    } finally {
+      setIsSavingPayment(false);
+    }
+  };
+
+  const getPaymentLabel = () => {
+    const opt = PAYMENT_OPTIONS.find(o => o.key === selectedPayment);
+    return opt ? `${opt.icon} ${opt.label}` : 'Cartão, Pix, dinheiro';
   };
 
   const handleLogout = () => {
@@ -136,13 +190,17 @@ export function ProfileScreen() {
             <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomColor: colors.border }]}
+            onPress={handleOpenPaymentModal}
+            activeOpacity={0.7}
+          >
             <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
               <Text style={styles.menuIcon}>💳</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.menuLabel, { color: colors.text }]}>Formas de pagamento</Text>
-              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Cartão, Pix, dinheiro</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>{getPaymentLabel()}</Text>
             </View>
             <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
           </TouchableOpacity>
@@ -187,6 +245,81 @@ export function ProfileScreen() {
 
         <Text style={[styles.version, { color: colors.textMuted }]}>88 Mobility v1.0.0</Text>
       </View>
+
+      {/* Modal de Formas de Pagamento */}
+      <Modal visible={showPaymentModal} transparent animationType="slide" onRequestClose={() => setShowPaymentModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Formas de Pagamento</Text>
+            <Text style={[styles.modalSub, { color: colors.textSecondary }]}>
+              Escolha seu método preferido. Ele será pré-selecionado ao solicitar corridas.
+            </Text>
+
+            {PAYMENT_OPTIONS.map((opt) => {
+              const isSelected = pendingPayment === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.paymentOption,
+                    {
+                      backgroundColor: isSelected
+                        ? (isDark ? 'rgba(245, 158, 11, 0.15)' : '#FFFBEB')
+                        : colors.background,
+                      borderColor: isSelected ? colors.amber : colors.border,
+                    },
+                  ]}
+                  onPress={() => setPendingPayment(opt.key)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.paymentIconBg, {
+                    backgroundColor: isSelected
+                      ? (isDark ? 'rgba(245, 158, 11, 0.25)' : '#FEF3C7')
+                      : colors.slate100,
+                  }]}>
+                    <Text style={styles.paymentIcon}>{opt.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.paymentLabel, { color: colors.text, fontWeight: isSelected ? '700' : '500' }]}>
+                      {opt.label}
+                    </Text>
+                    <Text style={[styles.paymentSub, { color: colors.textSecondary }]}>{opt.sub}</Text>
+                  </View>
+                  <View style={[
+                    styles.paymentRadio,
+                    {
+                      borderColor: isSelected ? colors.amber : colors.border,
+                      backgroundColor: isSelected ? colors.amber : 'transparent',
+                    },
+                  ]}>
+                    {isSelected && <View style={styles.paymentRadioDot} />}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalCancelBtn, { borderColor: colors.border }]}
+                onPress={() => setShowPaymentModal(false)}
+              >
+                <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSaveBtn, { backgroundColor: colors.amber }]}
+                onPress={handleSavePayment}
+                disabled={isSavingPayment}
+              >
+                {isSavingPayment ? (
+                  <ActivityIndicator color="#0F172A" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Confirmar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal Editar Perfil / Nome */}
       <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
@@ -381,5 +514,40 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 14,
     fontWeight: '700',
+  },
+
+  // Opções de pagamento
+  paymentOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: Radius.md,
+    borderWidth: 1.5,
+    marginBottom: Spacing.sm,
+    gap: 12,
+  },
+  paymentIconBg: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentIcon:  { fontSize: 20 },
+  paymentLabel: { fontSize: 14 },
+  paymentSub:   { fontSize: 12, marginTop: 1 },
+  paymentRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentRadioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#0F172A',
   },
 });

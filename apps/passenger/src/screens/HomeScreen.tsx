@@ -622,7 +622,11 @@ export function HomeScreen() {
     setStep('searching');
 
     // Mantém a conexão ativa em segundo plano para o passageiro poder alternar para o YouTube ou outros apps
-    startBackgroundKeepAlive('88 Mobility', 'Procurando motoristas parceiros próximos para sua corrida...');
+    try {
+      startBackgroundKeepAlive('88 Mobility', 'Procurando motoristas parceiros próximos para sua corrida...');
+    } catch (e) {
+      console.warn('Erro ao chamar keep-alive:', e);
+    }
 
     const ridePayload: SyncRidePayload = {
       id: rideId,
@@ -925,7 +929,7 @@ export function HomeScreen() {
           visible={showChat}
           onClose={() => setShowChat(false)}
           rideId={currentRideId}
-          currentUserId={user?.id ?? ''}
+          currentUserId={passenger?.id ?? ''}
           currentUserRole="PASSENGER"
           otherPartyName={`Chat com ${activeRide?.driverName?.split(' ')[0] ?? 'Motorista'}`}
           onNewMessage={() => setChatUnread(prev => prev + 1)}

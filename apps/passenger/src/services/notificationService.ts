@@ -78,6 +78,7 @@ export async function sendRideNotification(title: string, body: string, data?: R
         priority: Notifications.AndroidNotificationPriority.MAX,
         vibrate: [0, 250, 250, 250],
         data: data || {},
+        ...(Platform.OS === 'android' && { channelId: 'rides-channel' }),
       },
       trigger: null, // Disparo imediato
     });
@@ -89,12 +90,43 @@ export async function sendRideNotification(title: string, body: string, data?: R
 /**
  * Inicia o serviço em primeiro plano (Foreground Service) do Android
  * Garante que o Android NÃO encerre a conexão de rede nem o polling enquanto o passageiro assiste ao YouTube
+ *
+ * IMPORTANTE: Verifica permissões ANTES de chamar startLocationUpdatesAsync.
+ * Sem essa verificação, o app trava no Android 10+ quando a permissão
+ * "Permitir sempre" não foi concedida pelo usuário.
  */
 export async function startBackgroundKeepAlive(
   title: string = '88 Mobility',
   body: string = 'Procurando motoristas próximos...'
 ) {
   try {
+    // Verifica permissão de localização em foreground (mínimo necessário)
+    const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+    if (fgStatus !== 'granted') {
+      console.warn('[BG KeepAlive] Permissão de localização foreground não concedida. Abortando.');
+      return;
+    }
+
+    // No Android, verifica se a permissão de background foi concedida.
+    // Se não foi, retorna sem erro — o polling React continua funcionando em foreground.
+    if (Platform.OS === 'android') {
+      const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+      if (bgStatus !== 'granted') {
+        console.warn('[BG KeepAlive] Permissão de background location não concedida. Polling ativo apenas em foreground.');
+        return;
+      }
+    }
+
+    // Para iOS, background location exige permissão "Always"
+    if (Platform.OS === 'ios') {
+      const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+      if (bgStatus !== 'granted') {
+        console.warn('[BG KeepAlive] iOS: permissão "Always" não concedida. Abortando.');
+        return;
+      }
+    }
+
+    // Para antes de reiniciar (evita erro de task já registrada)
     const hasStarted = await Location.hasStartedLocationUpdatesAsync(PASSENGER_BG_TASK).catch(() => false);
     if (hasStarted) {
       await Location.stopLocationUpdatesAsync(PASSENGER_BG_TASK).catch(() => {});
@@ -109,8 +141,10 @@ export async function startBackgroundKeepAlive(
         notificationBody: body,
         notificationColor: '#F59E0B',
       },
+      pausesUpdatesAutomatically: false,
     });
   } catch (err) {
+    // Captura qualquer erro inesperado sem deixar o app travar
     console.warn('Erro ao iniciar background keep-alive:', err);
   }
 }

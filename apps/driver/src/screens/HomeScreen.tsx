@@ -28,6 +28,8 @@ import {
   sendRideNotification,
   startBackgroundKeepAlive,
   stopBackgroundKeepAlive,
+  setBgActiveRide,
+  addBgRejectedRideId,
 } from '../services/notificationService';
 
 const { height } = Dimensions.get('window');
@@ -406,6 +408,7 @@ export function HomeScreen() {
             } else if (activeRide && activeRide.id === ev.rideId) {
               stopNavigation();
               setActiveRide(null);
+              setBgActiveRide(null); // Limpa corrida ativa no BG Task
               setRidePhase('idle');
               Alert.alert('Corrida Cancelada', 'O passageiro cancelou a corrida em andamento.');
             }
@@ -462,6 +465,7 @@ export function HomeScreen() {
     const targetId = rideId || rideRequest?.id;
     if (targetId) {
       rejectedRideIds.current.add(targetId);
+      addBgRejectedRideId(targetId); // Avisa BG Task para ignorar esta corrida
       publishRideEvent({ type: 'DECLINE_RIDE', rideId: targetId });
     }
     Animated.timing(slideAnim, { toValue: 300, duration: 250, useNativeDriver: true }).start(() => {
@@ -542,6 +546,7 @@ export function HomeScreen() {
     });
 
     setActiveRide(current);
+    setBgActiveRide(current.id); // Avisa BG Task para nao re-notificar esta corrida
     Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }).start(() => {
       setRideRequest(null);
       slideAnim.setValue(300);
@@ -637,6 +642,7 @@ export function HomeScreen() {
         text: 'OK',
         onPress: () => {
           setActiveRide(null);
+          setBgActiveRide(null); // Limpa corrida ativa no BG Task
           setRidePhase('idle');
           loadTodayStats();
           if (isOnline) {

@@ -5,6 +5,24 @@ import { Platform } from 'react-native';
 
 export const DRIVER_BG_TASK = '88MOBILITY_DRIVER_BG_TASK';
 
+// URL do canal de sincronização em tempo real
+const SYNC_URL = 'https://ntfy.sh/88mobility_live_rides_sync';
+
+// Controle de estado em memória dentro da task (não pode usar React state aqui)
+let _lastBgPollTime = Math.floor(Date.now() / 1000) - 60;
+let _rejectedRideIds: Set<string> = new Set();
+let _activeRideId: string | null = null;
+
+/** Permite que o HomeScreen informe ao BG Task qual corrida está ativa (evita notificar novamente) */
+export function setBgActiveRide(rideId: string | null) {
+  _activeRideId = rideId;
+}
+
+/** Permite que o HomeScreen informe ao BG Task quais corridas já foram recusadas */
+export function addBgRejectedRideId(rideId: string) {
+  _rejectedRideIds.add(rideId);
+}
+
 // Manipulador padrão de notificações para exibir banner mesmo com o app em primeiro ou segundo plano
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -16,13 +34,100 @@ Notifications.setNotificationHandler({
   }),
 });
 
+/**
+ * Polling leve de corridas — executado dentro do BG Task
+ * Faz fetch no ntfy.sh e dispara notificação local se houver nova chamada de passageiro
+ */
+async function pollAndNotifyInBackground() {
+  try {
+    const sinceParam = `&since=${_lastBgPollTime}`;
+    const res = await fetch(`${SYNC_URL}/json?poll=1${sinceParam}`, {
+      headers: { Accept: 'application/x-ndjson' },
+    });
+
+    if (!res.ok) return;
+
+    const text = await res.text();
+    const lines = text.trim().split('\n');
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const item = JSON.parse(line);
+
+        if (item.time && item.time > _lastBgPollTime) {
+          _lastBgPollTime = item.time;
+        }
+
+        if (item.event === 'message' && item.message) {
+          const payload = JSON.parse(item.message);
+          if (!payload || !payload.type) continue;
+
+          // Nova chamada de passageiro
+          if (payload.type === 'REQUEST_RIDE' && payload.ride) {
+            const ride = payload.ride;
+
+            // Ignora se já recusou ou já está em andamento
+            if (_rejectedRideIds.has(ride.id)) continue;
+            if (_activeRideId && _activeRideId === ride.id) continue;
+
+            const valorFormatado = Number(ride.driverShare || 0).toLocaleString('pt-BR', {
+              style: 'currency',
+              currency: 'BRL',
+            });
+
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: `🚗 Nova Chamada! (${valorFormatado})`,
+                body: `Passageiro(a): ${ride.passengerName} • Buscar em: ${ride.origin?.address || 'Local desconhecido'}`,
+                sound: true,
+                priority: Notifications.AndroidNotificationPriority.MAX,
+                vibrate: [0, 400, 200, 400, 200, 400],
+                data: { rideId: ride.id, type: 'REQUEST_RIDE' },
+                ...(Platform.OS === 'android' && { channelId: 'driver-rides-channel' }),
+              },
+              trigger: null,
+            });
+          }
+
+          // Passageiro cancelou — avisa o motorista mesmo em background
+          if (
+            payload.type === 'CANCEL_RIDE' &&
+            (_activeRideId === payload.rideId || _activeRideId === null)
+          ) {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Corrida Cancelada ⚠️',
+                body: 'O passageiro cancelou o pedido de corrida.',
+                sound: true,
+                priority: Notifications.AndroidNotificationPriority.HIGH,
+                vibrate: [0, 300, 200, 300],
+                data: { rideId: payload.rideId, type: 'CANCEL_RIDE' },
+                ...(Platform.OS === 'android' && { channelId: 'driver-rides-channel' }),
+              },
+              trigger: null,
+            });
+          }
+        }
+      } catch {
+        // Ignora linha inválida
+      }
+    }
+  } catch (err) {
+    console.warn('[Driver BG Poll] Erro ao consultar eventos:', err);
+  }
+}
+
 // Registra a tarefa em segundo plano para manter a thread do app viva no Android
+// e faz polling de corridas mesmo com o app minimizado
 if (!TaskManager.isTaskDefined(DRIVER_BG_TASK)) {
   TaskManager.defineTask(DRIVER_BG_TASK, async ({ data, error }) => {
     if (error) {
       console.warn('[Driver BG Task] Erro:', error);
       return;
     }
+    // A cada atualização de localização (a cada ~3s), faz o polling de novas corridas
+    await pollAndNotifyInBackground();
   });
 }
 
@@ -78,6 +183,7 @@ export async function sendRideNotification(title: string, body: string, data?: R
         priority: Notifications.AndroidNotificationPriority.MAX,
         vibrate: [0, 300, 200, 300],
         data: data || {},
+        ...(Platform.OS === 'android' && { channelId: 'driver-rides-channel' }),
       },
       trigger: null,
     });
@@ -101,14 +207,16 @@ export async function startBackgroundKeepAlive(
     }
 
     await Location.startLocationUpdatesAsync(DRIVER_BG_TASK, {
-      accuracy: Location.Accuracy.High,
+      accuracy: Location.Accuracy.Balanced,
       timeInterval: 3000,
-      distanceInterval: 5,
+      distanceInterval: 0,  // dispara a cada 3s independentemente do movimento
       foregroundService: {
         notificationTitle: title,
         notificationBody: body,
         notificationColor: '#10B981',
       },
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true,
     });
   } catch (err) {
     console.warn('Erro ao iniciar background keep-alive do motorista:', err);
@@ -128,3 +236,4 @@ export async function stopBackgroundKeepAlive() {
     console.warn('Erro ao parar background keep-alive do motorista:', err);
   }
 }
+
