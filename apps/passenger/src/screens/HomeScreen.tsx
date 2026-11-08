@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { OSMMap, type CarPosition, type RouteCoordinate } from '../components/OSMMap';
 import { ChatModal } from '../components/ChatModal';
+import { RatingModal } from '../components/RatingModal';
 import type { Ride } from '../types';
 import type { PassengerRideHistoryItem } from './HistoryScreen';
 import {
@@ -89,6 +90,8 @@ export function HomeScreen() {
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
   const [showChat, setShowChat]           = useState(false);
   const [chatUnread, setChatUnread]       = useState(0);
+  const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [pendingRating, setPendingRating] = useState<{ id: string; driverName: string } | null>(null);
 
   // Rota e Carrinho 99
   const [carPosition, setCarPosition]           = useState<CarPosition | null>(null);
@@ -543,10 +546,35 @@ export function HomeScreen() {
               'O motorista não pôde aceitar esta chamada no momento. Você pode tentar novamente.'
             );
 
+          } else if (ev.type === 'CANCEL_RIDE' && currentRideId && ev.rideId === currentRideId) {
+            // Motorista cancelou a chamada / corrida
+            stopBackgroundKeepAlive();
+            setRouteCoordinates([]);
+            setCarPosition(null);
+            setCurrentRideId(null);
+            setActiveRide(null);
+            setStep('idle');
+            setDest(null);
+            setSearch('');
+            sendRideNotification(
+              'Corrida Cancelada ⚠️',
+              'O motorista precisou cancelar a corrida.'
+            );
+            Alert.alert(
+              'Corrida Cancelada',
+              'O motorista precisou cancelar esta chamada. Você pode solicitar um novo carro quando desejar.'
+            );
+
           } else if (ev.type === 'COMPLETE_RIDE' && currentRideId && ev.rideId === currentRideId) {
             // Motorista finalizou a corrida
             const finishedRideId = currentRideId;
             const finishedAmount = totalAmount;
+            const finishedDriverName = activeRide?.driverName || 'Motorista Parceiro';
+            const completedData = {
+              id: finishedRideId,
+              driverName: finishedDriverName,
+            };
+
             stopBackgroundKeepAlive();
             sendRideNotification(
               '🏁 Viagem Concluída!',
@@ -561,7 +589,7 @@ export function HomeScreen() {
                 destination: destination.label,
                 km: distanceKm,
                 total: finishedAmount,
-                driverName: activeRide?.driverName || 'Motorista Parceiro',
+                driverName: finishedDriverName,
                 status: 'completed',
               };
               const stored = await AsyncStorage.getItem(PASSENGER_HISTORY_KEY);
@@ -572,12 +600,23 @@ export function HomeScreen() {
 
             Alert.alert(
               'Viagem Concluída! 🎉',
-              `Total da corrida: ${formatBRL(finishedAmount)}\n\n88% é repassado automaticamente para a chave PIX do motorista.\n\nDeseja pagar agora com InfinitePay (PIX ou Cartão)?`,
+              `Total da corrida: ${formatBRL(finishedAmount)}\n\n88% é repassado automaticamente para a chave PIX do motorista.\n\nDeseja avaliar sua viagem e efetuar o pagamento?`,
               [
-                { text: 'Pagar Depois', style: 'cancel' },
+                {
+                  text: 'Avaliar Motorista ⭐',
+                  style: 'default',
+                  onPress: () => {
+                    setPendingRating(completedData);
+                    setRatingModalVisible(true);
+                  },
+                },
                 {
                   text: '⚡ Pagar com InfinitePay',
-                  onPress: () => openInfinitePayPayment(finishedRideId, finishedAmount),
+                  onPress: () => {
+                    openInfinitePayPayment(finishedRideId, finishedAmount);
+                    setPendingRating(completedData);
+                    setRatingModalVisible(true);
+                  },
                 },
               ]
             );
@@ -782,6 +821,46 @@ export function HomeScreen() {
         },
       },
     ]);
+  };
+
+  // Enviar avaliação do motorista pelo passageiro
+  const submitPassengerRating = async (rating: number, comment: string, tags: string[]) => {
+    setRatingModalVisible(false);
+    if (!pendingRating) return;
+
+    try {
+      const stored = await AsyncStorage.getItem('@88mobility_passenger_ratings');
+      const ratings = stored ? JSON.parse(stored) : [];
+      ratings.unshift({
+        rideId: pendingRating.id,
+        driverName: pendingRating.driverName,
+        rating,
+        comment,
+        tags,
+        timestamp: Date.now(),
+      });
+      await AsyncStorage.setItem('@88mobility_passenger_ratings', JSON.stringify(ratings));
+
+      // Salva no backend SQLite se disponível
+      fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://143.95.189.218/api'}/ratings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rideId: pendingRating.id,
+          evaluatorRole: 'PASSENGER',
+          evaluatorId: passenger?.id || 'passenger-1',
+          rating,
+          comment,
+          tags,
+        }),
+      }).catch(() => {});
+
+      Alert.alert('Avaliação Enviada! ⭐', 'Obrigado por avaliar seu motorista parceiro.');
+    } catch (e) {
+      console.warn('Erro ao salvar avaliação do passageiro:', e);
+    } finally {
+      setPendingRating(null);
+    }
   };
 
   const contactDriver = () => {
@@ -1173,6 +1252,18 @@ export function HomeScreen() {
           </View>
         </TouchableOpacity>
       )}
+
+      {/* Modal de Avaliação do Motorista pelo Passageiro */}
+      <RatingModal
+        visible={ratingModalVisible}
+        rideId={pendingRating?.id || ''}
+        driverName={pendingRating?.driverName || 'Motorista Parceiro'}
+        onSubmit={submitPassengerRating}
+        onClose={() => {
+          setRatingModalVisible(false);
+          setPendingRating(null);
+        }}
+      />
     </View>
   );
 }

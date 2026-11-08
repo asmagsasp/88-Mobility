@@ -9,6 +9,7 @@ import { Colors, Spacing, Radius } from '../constants/theme';
 import { useAuth } from '../contexts/AuthContext';
 import { OSMMap, type CarPosition, type RouteCoordinate } from '../components/OSMMap';
 import { ChatModal } from '../components/ChatModal';
+import { RatingModal } from '../components/RatingModal';
 import { NavigationBanner } from '../components/NavigationBanner';
 import type { CompletedDriverRide } from './EarningsScreen';
 import {
@@ -107,6 +108,8 @@ export function HomeScreen() {
   const [chatUnread, setChatUnread]   = useState(0);
   const [ridePhase, setRidePhase]     = useState<RidePhase>('idle');
   const [completedToday, setCompletedToday] = useState<{ total: number; count: number }>({ total: 0, count: 0 });
+  const [ratingModalVisible, setRatingModalVisible] = useState(false);
+  const [lastCompletedRide, setLastCompletedRide] = useState<{ id: string; passengerName: string } | null>(null);
 
   // Rota, Navegação GPS e Carrinho 99
   const [routeCoordinates, setRouteCoordinates] = useState<RouteCoordinate[]>([]);
@@ -634,6 +637,75 @@ export function HomeScreen() {
     );
   };
 
+  // Cancelar corrida em andamento pelo motorista
+  const cancelActiveRide = () => {
+    if (!activeRide) return;
+    Alert.alert(
+      'Cancelar Corrida',
+      'Tem certeza de que deseja cancelar esta chamada?',
+      [
+        { text: 'Não', style: 'cancel' },
+        {
+          text: 'Sim, Cancelar',
+          style: 'destructive',
+          onPress: async () => {
+            const rideIdToCancel = activeRide.id;
+            stopNavigation();
+            setActiveRide(null);
+            setBgActiveRide(null);
+            setRidePhase('idle');
+            await publishRideEvent({
+              type: 'CANCEL_RIDE',
+              rideId: rideIdToCancel,
+            });
+            sendRideNotification('Corrida Cancelada ⚠️', 'Você cancelou a corrida.');
+            Alert.alert('Corrida Cancelada', 'Você cancelou a chamada com sucesso.');
+          },
+        },
+      ]
+    );
+  };
+
+  // Enviar avaliação do passageiro pelo motorista
+  const submitDriverRating = async (rating: number, comment: string, tags: string[]) => {
+    setRatingModalVisible(false);
+    if (!lastCompletedRide) return;
+
+    try {
+      const stored = await AsyncStorage.getItem('@88mobility_driver_ratings');
+      const ratings = stored ? JSON.parse(stored) : [];
+      ratings.unshift({
+        rideId: lastCompletedRide.id,
+        passengerName: lastCompletedRide.passengerName,
+        rating,
+        comment,
+        tags,
+        timestamp: Date.now(),
+      });
+      await AsyncStorage.setItem('@88mobility_driver_ratings', JSON.stringify(ratings));
+
+      // Salva no backend SQLite se disponível
+      fetch(`${process.env.EXPO_PUBLIC_API_URL || 'http://143.95.189.218/api'}/ratings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rideId: lastCompletedRide.id,
+          evaluatorRole: 'DRIVER',
+          evaluatorId: driver?.id || 'abel-driver',
+          rating,
+          comment,
+          tags,
+        }),
+      }).catch(() => {});
+
+      Alert.alert('Avaliação Enviada! ⭐', 'Obrigado por avaliar o passageiro.');
+    } catch (e) {
+      console.warn('Erro ao salvar avaliação do motorista:', e);
+    } finally {
+      setLastCompletedRide(null);
+    }
+  };
+
   // Concluir corrida
   const completeRide = async () => {
     if (!activeRide) return;
@@ -670,8 +742,12 @@ export function HomeScreen() {
 
     Alert.alert('Corrida concluída! 🎉', `Você recebeu ${formatBRL(earning)} líquido (88% do valor total).`, [
       {
-        text: 'OK',
+        text: 'Avaliar Passageiro ⭐',
         onPress: () => {
+          const completedData = {
+            id: current.id,
+            passengerName: current.passengerName || 'Passageiro',
+          };
           setActiveRide(null);
           setBgActiveRide(null); // Limpa corrida ativa no BG Task
           setRidePhase('idle');
@@ -681,6 +757,8 @@ export function HomeScreen() {
           } else {
             stopBackgroundKeepAlive();
           }
+          setLastCompletedRide(completedData);
+          setRatingModalVisible(true);
         },
       },
     ]);
@@ -902,6 +980,15 @@ export function HomeScreen() {
               <Text style={styles.floatingActionBtnText}>✅ Finalizar Corrida</Text>
             </TouchableOpacity>
           )}
+
+          {/* Botão de Cancelar Chamada pelo Motorista */}
+          <TouchableOpacity
+            style={styles.cancelRideBtn}
+            onPress={cancelActiveRide}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.cancelRideBtnText}>❌ Cancelar Corrida</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -995,6 +1082,18 @@ export function HomeScreen() {
           </View>
         </Animated.View>
       )}
+
+      {/* Modal de Avaliação do Passageiro pelo Motorista */}
+      <RatingModal
+        visible={ratingModalVisible}
+        rideId={lastCompletedRide?.id || ''}
+        passengerName={lastCompletedRide?.passengerName || 'Passageiro'}
+        onSubmit={submitDriverRating}
+        onClose={() => {
+          setRatingModalVisible(false);
+          setLastCompletedRide(null);
+        }}
+      />
     </View>
   );
 }
@@ -1177,6 +1276,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 10,
     elevation: 10,
+  },
+  cancelRideBtn: {
+    paddingVertical: 11,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7F1D1D',
+    borderWidth: 1,
+    borderColor: '#991B1B',
+    marginTop: 6,
+  },
+  cancelRideBtnText: {
+    color: '#FECACA',
+    fontSize: 14,
+    fontWeight: '700',
   },
   floatingActionBtnText: {
     color: '#FFFFFF',
