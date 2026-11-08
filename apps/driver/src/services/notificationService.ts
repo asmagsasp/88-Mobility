@@ -23,6 +23,13 @@ export function addBgRejectedRideId(rideId: string) {
   _rejectedRideIds.add(rideId);
 }
 
+let _bgDriverInfo: { id: string; name: string; vehicle: string; plate: string } | null = null;
+let _lastBgHeartbeat = 0;
+
+export function setBgDriverInfo(info: { id: string; name: string; vehicle: string; plate: string } | null) {
+  _bgDriverInfo = info;
+}
+
 // Manipulador padrão de notificações para exibir banner mesmo com o app em primeiro ou segundo plano
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -126,7 +133,29 @@ if (!TaskManager.isTaskDefined(DRIVER_BG_TASK)) {
       console.warn('[Driver BG Task] Erro:', error);
       return;
     }
-    // A cada atualização de localização (a cada ~3s), faz o polling de novas corridas
+    // 1. Transmite heartbeat de online para os passageiros mesmo com o app minimizado
+    if (_bgDriverInfo && data && (data as any).locations && (data as any).locations.length > 0) {
+      const loc = (data as any).locations[0].coords;
+      if (loc && Date.now() - _lastBgHeartbeat > 6000) {
+        _lastBgHeartbeat = Date.now();
+        fetch(SYNC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', Title: 'DRIVER_STATUS' },
+          body: JSON.stringify({
+            type: 'DRIVER_STATUS',
+            driverId: _bgDriverInfo.id,
+            isOnline: true,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            vehicle: _bgDriverInfo.vehicle,
+            plate: _bgDriverInfo.plate,
+            name: _bgDriverInfo.name,
+          }),
+        }).catch(() => {});
+      }
+    }
+
+    // 2. Faz o polling de novas corridas
     await pollAndNotifyInBackground();
   });
 }

@@ -413,7 +413,7 @@ export function HomeScreen() {
 
         // Remove motoristas inativos cujo sinal expirou há mais de 30 segundos
         const now = Date.now();
-        setOnlineDrivers((prev) => prev.filter((d) => (now - d.lastSeen) <= 30000));
+        setOnlineDrivers((prev) => prev.filter((d) => (now - d.lastSeen) <= 60000));
 
         for (const ev of events) {
           // 1. Atualização do status online/offline do motorista

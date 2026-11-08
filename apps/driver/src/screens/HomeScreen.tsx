@@ -30,6 +30,7 @@ import {
   stopBackgroundKeepAlive,
   setBgActiveRide,
   addBgRejectedRideId,
+  setBgDriverInfo,
 } from '../services/notificationService';
 
 const { height } = Dimensions.get('window');
@@ -366,7 +367,7 @@ export function HomeScreen() {
       if (!isOnline || !isPolling) return;
       try {
         // Envia heartbeat do motorista a cada ~10 segundos para o app do passageiro
-        if (Date.now() - lastHeartbeat.current > 10000) {
+        if (Date.now() - lastHeartbeat.current > 4000) {
           lastHeartbeat.current = Date.now();
           publishRideEvent({
             type: 'DRIVER_STATUS',
