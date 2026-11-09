@@ -1,7 +1,7 @@
 /**
  * ChatModal — Bate-papo em tempo real entre passageiro e motorista
- * Visual estilo WhatsApp com 2 ticks azuis de confirmação de envio (✓✓),
- * barra de digitação mais alta e botão de fechar (X) acessível na parte inferior.
+ * Visual estilo WhatsApp com 2 ticks azuis (✓✓), teclado 100% funcional no Android
+ * através de sobreposição direta na Activity (sem bugs de foco do Modal nativo).
  */
 import React, {
   useState,
@@ -10,7 +10,6 @@ import React, {
   useCallback,
 } from 'react';
 import {
-  Modal,
   View,
   Text,
   TextInput,
@@ -22,6 +21,7 @@ import {
   ActivityIndicator,
   Keyboard,
   SafeAreaView,
+  BackHandler,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { publishRideEvent, pollRideEvents } from '../services/rideSync';
@@ -62,10 +62,22 @@ export function ChatModal({
   const [otherTyping, setOtherTyping] = useState(false);
 
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  const inputRef = useRef<TextInput>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
   const storageKey = `@88mobility_chat_${rideId}`;
+
+  // Botão voltar nativo do Android fecha o chat
+  useEffect(() => {
+    if (!visible) return;
+    const backAction = () => {
+      onClose();
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [visible, onClose]);
 
   // 1. Carrega histórico de mensagens do AsyncStorage
   const loadMessagesFromStorage = useCallback(async () => {
@@ -81,7 +93,7 @@ export function ChatModal({
     }
   }, [rideId, storageKey]);
 
-  // 2. Polling ativo enquanto o modal estiver aberto
+  // 2. Polling ativo enquanto o chat estiver aberto
   useEffect(() => {
     if (!visible || !rideId) return;
 
@@ -234,18 +246,14 @@ export function ChatModal({
     );
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={onClose}
-    >
+    <View style={styles.modalOverlay}>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.container}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
         >
           {/* Header Superior */}
           <View style={styles.header}>
@@ -272,6 +280,7 @@ export function ChatModal({
               renderItem={renderMessage}
               contentContainerStyle={styles.messageList}
               onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+              keyboardShouldPersistTaps="handled"
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <Text style={styles.emptyIcon}>💬</Text>
@@ -289,7 +298,7 @@ export function ChatModal({
             </View>
           )}
 
-          {/* Barra de Digitação (Mais em cima e ergonômica) */}
+          {/* Barra de Digitação — Acesso Direto sem bloqueio de janela */}
           <View style={styles.inputRow}>
             <TextInput
               style={styles.textInput}
@@ -297,10 +306,12 @@ export function ChatModal({
               onChangeText={handleTyping}
               placeholder="Digite uma mensagem..."
               placeholderTextColor="#94A3B8"
-              multiline
+              multiline={false}
               maxLength={500}
               returnKeyType="send"
               onSubmitEditing={sendMessage}
+              autoFocus={false}
+              blurOnSubmit={false}
             />
             <TouchableOpacity
               onPress={sendMessage}
@@ -316,7 +327,7 @@ export function ChatModal({
             </TouchableOpacity>
           </View>
 
-          {/* Barra inferior com o "X Fechar" mais embaixo para fácil alcance */}
+          {/* Barra inferior com o botão de Fechar acessível */}
           <View style={styles.bottomBar}>
             <TouchableOpacity onPress={onClose} style={styles.bottomCloseBtn} activeOpacity={0.7}>
               <Text style={styles.bottomCloseBtnText}>✕ Fechar Chat</Text>
@@ -324,11 +335,21 @@ export function ChatModal({
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#0F172A',
+    zIndex: 99999,
+    elevation: 99999,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#0F172A',
@@ -469,12 +490,10 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    minHeight: 44,
-    maxHeight: 100,
+    height: 48,
     backgroundColor: '#0F172A',
-    borderRadius: 22,
+    borderRadius: 24,
     paddingHorizontal: 16,
-    paddingVertical: 10,
     fontSize: 15,
     color: '#FFFFFF',
     marginRight: 8,
