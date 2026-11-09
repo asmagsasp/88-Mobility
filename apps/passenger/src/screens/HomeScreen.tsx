@@ -549,6 +549,11 @@ export function HomeScreen() {
             }
 
           } else if (ev.type === 'CANCEL_RIDE') {
+            // Se o próprio passageiro cancelou, ignora para não disparar alerta falso
+            if (ev.cancelledBy === 'PASSENGER') {
+              continue;
+            }
+
             const activeId = currentRideIdRef.current;
             const currentStep = stepRef.current;
             if (activeId || currentStep === 'searching' || currentStep === 'active') {
@@ -754,11 +759,12 @@ export function HomeScreen() {
     setDest(null);
     setSearch('');
 
-    // 2. Dispara cancelamento em background
+    // 2. Dispara cancelamento em background informando que partiu do passageiro
     if (rideIdToCancel) {
       publishRideEvent({
         type: 'CANCEL_RIDE',
         rideId: rideIdToCancel,
+        cancelledBy: 'PASSENGER',
       }).catch(() => {});
     }
   };

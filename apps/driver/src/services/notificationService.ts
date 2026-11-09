@@ -41,14 +41,15 @@ Notifications.setNotificationHandler({
   }),
 });
 
+const _seenBgEventIds = new Set<string>();
+
 /**
  * Polling leve de corridas — executado dentro do BG Task
  * Faz fetch no ntfy.sh e dispara notificação local se houver nova chamada de passageiro
  */
 async function pollAndNotifyInBackground() {
   try {
-    const sinceParam = `&since=${_lastBgPollTime}`;
-    const res = await fetch(`${SYNC_URL}/json?poll=1${sinceParam}`, {
+    const res = await fetch(`${SYNC_URL}/json?poll=1`, {
       headers: { Accept: 'application/x-ndjson' },
     });
 
@@ -61,9 +62,12 @@ async function pollAndNotifyInBackground() {
       if (!line.trim()) continue;
       try {
         const item = JSON.parse(line);
+        if (!item.id || _seenBgEventIds.has(item.id)) continue;
+        _seenBgEventIds.add(item.id);
 
-        if (item.time && item.time > _lastBgPollTime) {
-          _lastBgPollTime = item.time;
+        if (_seenBgEventIds.size > 1000) {
+          const firstKey = _seenBgEventIds.values().next().value;
+          if (firstKey) _seenBgEventIds.delete(firstKey);
         }
 
         if (item.event === 'message' && item.message) {
@@ -100,6 +104,7 @@ async function pollAndNotifyInBackground() {
           // Passageiro cancelou — avisa o motorista mesmo em background
           if (
             payload.type === 'CANCEL_RIDE' &&
+            payload.cancelledBy !== 'DRIVER' &&
             (_activeRideId === payload.rideId || _activeRideId === null)
           ) {
             await Notifications.scheduleNotificationAsync({

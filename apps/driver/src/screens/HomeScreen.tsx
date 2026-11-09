@@ -410,6 +410,11 @@ export function HomeScreen() {
               { rideId: requested.id }
             );
           } else if (ev.type === 'CANCEL_RIDE') {
+            // Se o próprio motorista cancelou, ignora para não notificar a si mesmo
+            if (ev.cancelledBy === 'DRIVER') {
+              continue;
+            }
+
             sendRideNotification('Corrida Cancelada ⚠️', 'O passageiro cancelou o pedido.');
             if (rideRequestRef.current && (!ev.rideId || ev.rideId === 'global' || rideRequestRef.current.id === ev.rideId)) {
               dismissRequest();
@@ -649,10 +654,11 @@ export function HomeScreen() {
             setActiveRide(null);
             setBgActiveRide(null);
             setRidePhase('idle');
-            await publishRideEvent({
+            publishRideEvent({
               type: 'CANCEL_RIDE',
               rideId: rideIdToCancel,
-            });
+              cancelledBy: 'DRIVER',
+            }).catch(() => {});
             sendRideNotification('Corrida Cancelada ⚠️', 'Você cancelou a corrida.');
             Alert.alert('Corrida Cancelada', 'Você cancelou a chamada com sucesso.');
           },
