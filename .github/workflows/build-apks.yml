@@ -52,9 +52,22 @@ jobs:
           EXPO_PUBLIC_API_URL: http://143.95.189.218/api
           EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
+      - name: Configurar Cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
       - name: Compilar APK (Release)
         working-directory: apps/passenger/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          for i in 1 2 3; do
+            echo "Tentativa $i de compilação..."
+            ./gradlew assembleRelease --no-daemon --stacktrace && break || {
+              if [ $i -eq 3 ]; then echo "Falha definitiva após 3 tentativas."; exit 1; fi
+              echo "Falha na tentativa $i. Aguardando 15s antes de retentar..."
+              sleep 15
+            }
+          done
         env:
           EXPO_PUBLIC_API_URL: http://143.95.189.218/api
           EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
@@ -109,9 +122,22 @@ jobs:
           EXPO_PUBLIC_API_URL: http://143.95.189.218/api
           EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
 
+      - name: Configurar Cache do Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
       - name: Compilar APK (Release)
         working-directory: apps/driver/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          for i in 1 2 3; do
+            echo "Tentativa $i de compilação..."
+            ./gradlew assembleRelease --no-daemon --stacktrace && break || {
+              if [ $i -eq 3 ]; then echo "Falha definitiva após 3 tentativas."; exit 1; fi
+              echo "Falha na tentativa $i. Aguardando 15s antes de retentar..."
+              sleep 15
+            }
+          done
         env:
           EXPO_PUBLIC_API_URL: http://143.95.189.218/api
           EXPO_PUBLIC_SOCKET_URL: http://143.95.189.218
