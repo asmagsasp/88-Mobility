@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, Switch, Modal, TextInput, ActivityIndicator,
+  Alert, Switch, Modal, TextInput, ActivityIndicator, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Spacing, Radius } from '../constants/theme';
@@ -128,6 +128,29 @@ export function ProfileScreen() {
     return opt ? `${opt.icon} ${opt.label}` : 'Cartão, Pix, dinheiro';
   };
 
+  const handleOpenSupportWhatsapp = async () => {
+    const phone = '551934585300';
+    const message = encodeURIComponent('Olá! Gostaria de tirar dúvidas e obter informações sobre o app 88 Mobility.');
+    const appUrl = `whatsapp://send?phone=${phone}&text=${message}`;
+    const webUrl = `https://wa.me/${phone}?text=${message}`;
+
+    try {
+      const supported = await Linking.canOpenURL(appUrl);
+      if (supported) {
+        await Linking.openURL(appUrl);
+      } else {
+        await Linking.openURL(webUrl);
+      }
+    } catch {
+      await Linking.openURL(webUrl).catch(() => {
+        Alert.alert(
+          'Ajuda & Suporte',
+          'Não foi possível abrir o WhatsApp automaticamente. Adicione o número (19) 3458-5300 aos seus contatos para falar com nossa IA de suporte.'
+        );
+      });
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert('Sair do app?', '', [
       { text: 'Cancelar', style: 'cancel' },
@@ -224,13 +247,19 @@ export function ProfileScreen() {
             />
           </View>
 
-          <TouchableOpacity style={[styles.menuItem, { borderBottomWidth: 0 }]} activeOpacity={0.7}>
-            <View style={[styles.menuIconBg, { backgroundColor: colors.slate100 }]}>
-              <Text style={styles.menuIcon}>❓</Text>
+          <TouchableOpacity
+            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+            activeOpacity={0.7}
+            onPress={handleOpenSupportWhatsapp}
+          >
+            <View style={[styles.menuIconBg, { backgroundColor: '#25D36620' }]}>
+              <Text style={styles.menuIcon}>💬</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.menuLabel, { color: colors.text }]}>Ajuda e suporte</Text>
-              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>Central de atendimento 88 Mobility</Text>
+              <Text style={[styles.menuSub, { color: colors.textSecondary }]}>
+                Fale com nossa IA no WhatsApp (19) 3458-5300
+              </Text>
             </View>
             <Text style={[styles.menuArrow, { color: colors.slate400 }]}>›</Text>
           </TouchableOpacity>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, TextInput, ActivityIndicator, Image, Switch, Modal,
+  Alert, TextInput, ActivityIndicator, Image, Switch, Modal, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -291,6 +291,29 @@ export function ProfileScreen() {
     }
   };
 
+  const handleOpenSupportWhatsapp = async () => {
+    const phone = '551934585300';
+    const message = encodeURIComponent('Olá! Sou motorista parceiro e gostaria de tirar dúvidas e obter informações sobre o app 88 Mobility.');
+    const appUrl = `whatsapp://send?phone=${phone}&text=${message}`;
+    const webUrl = `https://wa.me/${phone}?text=${message}`;
+
+    try {
+      const supported = await Linking.canOpenURL(appUrl);
+      if (supported) {
+        await Linking.openURL(appUrl);
+      } else {
+        await Linking.openURL(webUrl);
+      }
+    } catch {
+      await Linking.openURL(webUrl).catch(() => {
+        Alert.alert(
+          'Ajuda & Suporte',
+          'Não foi possível abrir o WhatsApp automaticamente. Adicione o número (19) 3458-5300 aos seus contatos para falar com nossa IA de suporte.'
+        );
+      });
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert('Sair do app?', 'Você será desconectado da sua conta.', [
       { text: 'Cancelar', style: 'cancel' },
@@ -504,12 +527,12 @@ export function ProfileScreen() {
         <TouchableOpacity
           style={styles.menuItem}
           activeOpacity={0.7}
-          onPress={() => Alert.alert('Suporte 88 Mobility', 'Central de atendimento oficial ao motorista parceiro 24h disponível pelo WhatsApp e e-mail.')}
+          onPress={handleOpenSupportWhatsapp}
         >
-          <Text style={styles.menuIcon}>❓</Text>
+          <Text style={styles.menuIcon}>💬</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.menuLabel}>Ajuda e suporte</Text>
-            <Text style={styles.menuSub}>Central 88 Mobility 24h</Text>
+            <Text style={styles.menuSub}>Fale com nossa IA no WhatsApp (19) 3458-5300</Text>
           </View>
           <Text style={styles.menuArrow}>›</Text>
         </TouchableOpacity>
